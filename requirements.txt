@@ -1,0 +1,26 @@
+# Ядро проекта
+Django
+djangorestframework
+
+# Авторизация и токены
+djangorestframework-simplejwt
+
+# Инструменты для API (CORS и фильтрация)
+django-cors-headers
+django-filter
+
+# Асинхронные задачи и кэш
+celery
+redis
+
+# Работа с базой данных PostgreSQL
+psycopg2-binary
+
+# Сервер для Docker (Production)
+gunicorn
+
+# Генерация Excel-отчетов (используется в твоем сервисе)
+openpyxl
+
+# Работа с файлами (на случай, если есть картинки в Attachments)
+Pillow

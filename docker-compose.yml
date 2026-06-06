@@ -1,0 +1,72 @@
+# stek_erp/docker-compose.yml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: erp_db
+      POSTGRES_USER: erp_user
+      POSTGRES_PASSWORD: my_super_secret_password # Укажи свой пароль
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:alpine
+    restart: always
+
+  backend:
+    # Собираем образ из корневой папки (где лежит наш новый Dockerfile)
+    build: . 
+    restart: always
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn --bind 0.0.0.0:8000 Mini_ERP.wsgi:application"
+    volumes:
+      - static_volume:/app/static
+      - media_volume:/app/media
+    environment:
+      - DB_HOST=db
+      - DB_NAME=erp_db
+      - DB_USER=erp_user
+      - DB_PASSWORD=my_super_secret_password
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  celery:
+    # Celery тоже использует корневой образ бэкенда
+    build: .
+    restart: always
+    command: celery -A Mini_ERP worker -l info
+    volumes:
+      - media_volume:/app/media
+    environment:
+      - DB_HOST=db
+      - DB_NAME=erp_db
+      - DB_USER=erp_user
+      - DB_PASSWORD=my_super_secret_password
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - backend
+      - redis
+
+  frontend:
+    # Фронтенд собирается из папки frontend
+    build: ./frontend
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - static_volume:/app/static
+      - media_volume:/app/media
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
