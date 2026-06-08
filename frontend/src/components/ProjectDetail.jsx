@@ -22,7 +22,6 @@ function ProjectDetail() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Определение мобильного экрана для уменьшения ширины Ганта
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -37,7 +36,7 @@ function ProjectDetail() {
   const [ganttZoom, setGanttZoom] = useState(ViewMode.Day);
   const [collapsedTasks, setCollapsedTasks] = useState([]);
 
-  // Модалки
+  // Модалки Задач
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
@@ -57,6 +56,10 @@ function ProjectDetail() {
   const [isCompletionModalOpen, setIsCompletionModalOpen] = useState(false);
   const [taskToComplete, setTaskToComplete] = useState(null);
   const [completionDelayReason, setCompletionDelayReason] = useState('');
+
+  // Модалка Редактирования Проекта
+  const [isProjectEditModalOpen, setIsProjectEditModalOpen] = useState(false);
+  const [editProjectTitle, setEditProjectTitle] = useState('');
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -103,6 +106,18 @@ function ProjectDetail() {
     }
   };
 
+  const handleUpdateProject = async (e) => {
+    e.preventDefault();
+    if (!editProjectTitle.trim()) return alert("Название проекта не может быть пустым.");
+    try {
+      const response = await api.patch(`projects/${id}/`, { title: editProjectTitle });
+      setProject(response.data); // Оптимистичное обновление без перезагрузки
+      setIsProjectEditModalOpen(false);
+    } catch (error) {
+      alert("Ошибка при обновлении проекта.");
+    }
+  };
+
   const handleDeleteProject = async () => {
     if (!window.confirm("⚠️ ВНИМАНИЕ! Вы уверены, что хотите удалить этот проект?")) return;
     try {
@@ -130,7 +145,7 @@ function ProjectDetail() {
       setLoading(true);
       await api.post(`projects/${id}/${endpoint}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       alert("Структура задач успешно загружена!");
-      fetchData(); // Тут рефреш оправдан, так как заливается весь проект разом
+      fetchData();
     } catch (error) {
       alert(`Ошибка при импорте: ${error.response?.data?.error || 'Проверьте формат файла'}`);
       setLoading(false);
@@ -317,7 +332,6 @@ function ProjectDetail() {
           const isFolder = rt.type === 'project';
           const originalTask = tasks.find(t => t.id.toString() === rt.id);
 
-          // Проверяем, просрочена ли задача (дедлайн меньше сегодня и она не завершена)
           const isOverdue = originalTask && originalTask.plan_end_date < today && originalTask.status !== 'completed';
 
           return (
@@ -361,7 +375,6 @@ function ProjectDetail() {
     );
   };
 
-  // ОПТИМИЗИРОВАНО: Обновление даты в Ганте без лишних запросов
   const handleGanttDateChange = async (ganttTask) => {
     if (!isFullAccess) return alert("У вас нет прав для изменения сроков.");
     const payload = { plan_start_date: ganttTask.start.toISOString().split('T')[0], plan_end_date: ganttTask.end.toISOString().split('T')[0] };
@@ -370,7 +383,7 @@ function ProjectDetail() {
       setTasks(prevTasks => prevTasks.map(t => t.id === Number(ganttTask.id) ? response.data : t));
     } catch (error) {
       alert("Ошибка сохранения");
-      fetchData(); // Страховка при ошибке сети
+      fetchData();
     }
   };
 
@@ -398,7 +411,6 @@ function ProjectDetail() {
     try { await api.patch(`tasks/${taskId}/`, { status: newStatus }); } catch (error) { fetchData(); }
   };
 
-  // ОПТИМИЗИРОВАНО: Завершение просроченной задачи без моргания
   const handleConfirmCompletion = async (e) => {
     e.preventDefault();
     if (!completionDelayReason.trim()) return alert("Укажите причину просрочки!");
@@ -414,16 +426,24 @@ function ProjectDetail() {
     catch (error) { fetchData(); }
   };
 
-  // ОПТИМИЗИРОВАНО: Создание задачи
   const handleCreateTask = async (e) => {
     e.preventDefault();
+
+    // ВАЛИДАЦИЯ ДАТ ПРИ СОЗДАНИИ
+    if (!newTaskPlanStart || !newTaskPlanEnd) {
+      return alert("Необходимо указать дату начала и дедлайн задачи.");
+    }
+    if (new Date(newTaskPlanStart) > new Date(newTaskPlanEnd)) {
+      return alert("Дата начала не может быть позже дедлайна.");
+    }
+
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
-      project: parseInt(id), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee,
+      project: parseInt(id), plan_start_date: newTaskPlanStart, plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee,
       parent_task: newTaskParent ? parseInt(newTaskParent) : null,
       linked_tasks: newTaskLinkedTasks
     };
-    if (newTaskPlanStart) payload.plan_start_date = newTaskPlanStart;
+
     try {
       const response = await api.post('tasks/', payload);
       setTasks(prevTasks => [...prevTasks, response.data]);
@@ -446,15 +466,22 @@ function ProjectDetail() {
     setNewCommentText(''); setIsEditModalOpen(true);
   };
 
-  // ОПТИМИЗИРОВАНО: Редактирование задачи
   const handleUpdateTask = async (e) => {
     e.preventDefault();
+
+    // ВАЛИДАЦИЯ ДАТ ПРИ РЕДАКТИРОВАНИИ
+    if (!editFormData.plan_start_date || !editFormData.plan_end_date) {
+      return alert("Необходимо указать дату начала и дедлайн задачи.");
+    }
+    if (new Date(editFormData.plan_start_date) > new Date(editFormData.plan_end_date)) {
+      return alert("Дата начала не может быть позже дедлайна.");
+    }
+
     const isOverdue = editingTask.plan_end_date && editingTask.plan_end_date < today;
     if (editFormData.status === 'completed' && isOverdue && editingTask.status !== 'completed') {
       setTaskToComplete(editingTask); setCompletionDelayReason(editingTask.delay_reason || ''); setIsCompletionModalOpen(true); setIsEditModalOpen(false); return;
     }
     const payload = { ...editFormData };
-    if (!payload.plan_start_date) payload.plan_start_date = null;
     try {
       const response = await api.patch(`tasks/${editingTask.id}/`, payload);
       setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
@@ -529,6 +556,15 @@ function ProjectDetail() {
           {isFullAccess && (
             <>
               <button onClick={() => fileInputRef.current.click()} className="flex-1 sm:flex-none px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap">📥 Импорт</button>
+
+              {/* КНОПКА РЕДАКТИРОВАНИЯ ПРОЕКТА */}
+              <button
+                onClick={() => { setEditProjectTitle(project.title); setIsProjectEditModalOpen(true); }}
+                className="flex-1 sm:flex-none px-4 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap"
+              >
+                ✏️ Изменить
+              </button>
+
               <button onClick={handleDeleteProject} className="flex-1 sm:flex-none px-4 py-2 border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap">🗑️ Удалить</button>
             </>
           )}
@@ -618,6 +654,31 @@ function ProjectDetail() {
         </div>
       )}
 
+      {/* --- МОДАЛКА РЕДАКТИРОВАНИЯ ПРОЕКТА --- */}
+      {isProjectEditModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsProjectEditModalOpen(false); }}>
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-gray-800 mb-4">Изменить проект</h3>
+            <form onSubmit={handleUpdateProject}>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Название проекта</label>
+                <input
+                  type="text"
+                  value={editProjectTitle}
+                  onChange={(e) => setEditProjectTitle(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setIsProjectEditModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
+                <button type="submit" className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-medium shadow-md transition-colors">Сохранить</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* --- ПОЛНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ --- */}
       {isEditModalOpen && editingTask && (
         <div
@@ -665,8 +726,8 @@ function ProjectDetail() {
                       </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div><label className="text-xs text-gray-500">Начало</label><input type="date" value={editFormData.plan_start_date || ''} onChange={e => setEditFormData({...editFormData, plan_start_date: e.target.value})} className="w-full border p-2 rounded" /></div>
-                      <div><label className="text-xs text-gray-500">Дедлайн</label><input type="date" value={editFormData.plan_end_date || ''} onChange={e => setEditFormData({...editFormData, plan_end_date: e.target.value})} className="w-full border p-2 rounded" /></div>
+                      <div><label className="text-xs text-gray-500">Начало *</label><input type="date" value={editFormData.plan_start_date || ''} onChange={e => setEditFormData({...editFormData, plan_start_date: e.target.value})} className="w-full border p-2 rounded" required /></div>
+                      <div><label className="text-xs text-gray-500">Дедлайн *</label><input type="date" value={editFormData.plan_end_date || ''} onChange={e => setEditFormData({...editFormData, plan_end_date: e.target.value})} className="w-full border p-2 rounded" required /></div>
                     </div>
                     <div><label className="block text-sm text-gray-700 mb-1">Описание</label><textarea value={editFormData.description || ''} onChange={e => setEditFormData({...editFormData, description: e.target.value})} className="w-full p-2 border rounded min-h-[80px] break-words" /></div>
                   </form>
@@ -800,8 +861,8 @@ function ProjectDetail() {
               </div>
               <div className="bg-gray-50 p-4 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-4 border border-gray-100">
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План)</label>
-                  <input type="date" value={newTaskPlanStart} onChange={(e) => setNewTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm outline-none" />
+                  <label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План) *</label>
+                  <input type="date" value={newTaskPlanStart} onChange={(e) => setNewTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm outline-none" required />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-500 mb-1">Дедлайн *</label>
