@@ -6,8 +6,10 @@ import api from '../api';
 function Projects() {
   const [projects, setProjects] = useState([]);
   const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(null); // Сохраняем текущего пользователя
+
+  // ОПТИМИЗАЦИЯ: Отдельный стейт загрузки только для проектов
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // Состояния модалки создания проекта
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -31,48 +33,54 @@ function Projects() {
   const [editAllowedUsers, setEditAllowedUsers] = useState([]);
 
   useEffect(() => {
-    fetchData();
+    // ОПТИМИЗАЦИЯ: Читаем токен сразу синхронно, чтобы права заработали до загрузки сети
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        setCurrentUser({ id: payload.user_id, role: payload.role });
+      } catch (e) {
+        console.error("Ошибка чтения токена:", e);
+      }
+    }
+
+    // Запускаем запросы параллельно, но проекты не ждут юзеров
+    fetchProjects();
+    fetchUsersBackground();
   }, []);
 
-  const fetchData = async () => {
+  const fetchProjects = async () => {
     try {
-      const [projectsRes, usersRes] = await Promise.all([
-        api.get('projects/'),
-        api.get('users/').catch(() => ({ data: [] }))
-      ]);
-      setProjects(projectsRes.data);
-
-      const fetchedUsers = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.results || []);
-      setUsers(fetchedUsers);
-
-      // Получаем данные текущего пользователя из токена для проверки прав
-      const token = localStorage.getItem('token');
-      if (token) {
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          setCurrentUser({ id: payload.user_id, role: payload.role });
-        } catch (e) {
-          console.error("Ошибка чтения токена:", e);
-        }
-      }
-
-      setLoading(false);
+      setLoadingProjects(true);
+      const res = await api.get('projects/');
+      // Поддержка пагинации (на случай, если список проектов станет огромным)
+      setProjects(res.data.results || res.data);
     } catch (error) {
-      console.error("Ошибка загрузки:", error);
-      setLoading(false);
+      console.error("Ошибка загрузки проектов:", error);
+    } finally {
+      setLoadingProjects(false);
     }
   };
 
-  // Преобразуем список юзеров для React-Select
+  const fetchUsersBackground = async () => {
+    try {
+      // Грузим юзеров в фоне, чтобы они были готовы к открытию модалки
+      const res = await api.get('users/');
+      const fetchedUsers = Array.isArray(res.data) ? res.data : (res.data?.results || []);
+      setUsers(fetchedUsers);
+    } catch (error) {
+      console.error("Ошибка фоновой загрузки пользователей:", error);
+    }
+  };
+
   const userOptions = users.map(u => ({
     value: u.id,
     label: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username
   }));
 
-  // Функция проверки прав (Админ, Директор или Менеджер этого проекта)
   const canEditProject = (project) => {
     if (!currentUser) return false;
-    const managerId = project.manager?.id ?? project.manager; // Поддержка объектов и ID
+    const managerId = project.manager?.id ?? project.manager;
     return currentUser.role === 'admin' || currentUser.role === 'director' || currentUser.id == managerId;
   };
 
@@ -130,7 +138,6 @@ function Projects() {
 
     try {
       const response = await api.patch(`projects/${editProjectId}/`, payload);
-      // Оптимистичное обновление списка
       setProjects(projects.map(p => p.id === editProjectId ? response.data : p));
       setIsEditModalOpen(false);
     } catch (error) {
@@ -140,11 +147,15 @@ function Projects() {
 
   const handleDeleteProject = async (id) => {
     if (!window.confirm("Удалить проект навсегда? Это действие необратимо.")) return;
+
+    // Оптимистичное удаление (мгновенно убираем с экрана)
+    setProjects(prev => prev.filter(p => p.id !== id));
+
     try {
       await api.delete(`projects/${id}/`);
-      setProjects(projects.filter(p => p.id !== id));
     } catch (error) {
       alert("Ошибка при удалении.");
+      fetchProjects(); // Откатываем назад при ошибке
     }
   };
 
@@ -158,7 +169,17 @@ function Projects() {
     }
   };
 
-  if (loading) return <div className="p-12 text-center text-gray-500">Загрузка...</div>;
+  if (loadingProjects) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-12 text-gray-500">
+        <svg className="animate-spin h-10 w-10 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span className="font-medium text-lg">Загрузка проектов...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col">
@@ -169,35 +190,45 @@ function Projects() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {projects.map(project => (
-          <div key={project.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex flex-col hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start mb-4">
-              <h3 className="text-xl font-bold text-gray-800 line-clamp-2">{project.title}</h3>
+      {projects.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-2xl border border-gray-100 p-12">
+          <span className="text-6xl mb-4">📭</span>
+          <h3 className="text-xl font-bold text-gray-700 mb-2">Проектов пока нет</h3>
+          <p className="text-gray-500 mb-6 text-center max-w-md">Здесь будут отображаться все ваши рабочие проекты. Нажмите кнопку выше, чтобы создать первый!</p>
+          <button onClick={() => setIsModalOpen(true)} className="bg-blue-50 text-blue-600 px-6 py-2 rounded-lg font-bold hover:bg-blue-100 transition-colors">
+            Создать проект
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {projects.map(project => (
+            <div key={project.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex flex-col hover:shadow-md transition-shadow">
+              <div className="flex justify-between items-start mb-4">
+                <h3 className="text-xl font-bold text-gray-800 line-clamp-2" title={project.title}>{project.title}</h3>
 
-              {/* Показываем кнопки управления ТОЛЬКО если есть права */}
-              {canEditProject(project) && (
-                <div className="flex space-x-3 ml-4 shrink-0">
-                  <button onClick={() => handleOpenEdit(project)} className="text-blue-400 hover:text-blue-600 transition-colors text-lg" title="Редактировать">✏️</button>
-                  <button onClick={() => handleDeleteProject(project.id)} className="text-red-400 hover:text-red-600 transition-colors text-lg" title="Удалить">🗑️</button>
-                </div>
-              )}
+                {canEditProject(project) && (
+                  <div className="flex space-x-3 ml-4 shrink-0">
+                    <button onClick={() => handleOpenEdit(project)} className="text-blue-400 hover:text-blue-600 transition-colors text-lg" title="Редактировать">✏️</button>
+                    <button onClick={() => handleDeleteProject(project.id)} className="text-red-400 hover:text-red-600 transition-colors text-lg" title="Удалить">🗑️</button>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-gray-600 text-sm mb-6 flex-1 line-clamp-3" title={project.description}>{project.description || 'Без описания'}</p>
+
+              <div className="flex items-center text-xs text-gray-400 mb-4 space-x-4">
+                {project.plan_end_date && <span>📅 До: {project.plan_end_date}</span>}
+                {project.manager_name && <span className="truncate">👤 {project.manager_name}</span>}
+              </div>
+
+              <div className="flex justify-between items-center border-t border-gray-50 pt-4 mt-auto">
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-gray-100 text-gray-500 rounded">{getVisibilityLabel(project.visibility)}</span>
+                <Link to={`/projects/${project.id}`} className="text-blue-600 hover:text-blue-800 text-sm font-bold">Открыть →</Link>
+              </div>
             </div>
-
-            <p className="text-gray-600 text-sm mb-6 flex-1 line-clamp-3">{project.description || 'Без описания'}</p>
-
-            <div className="flex items-center text-xs text-gray-400 mb-4 space-x-4">
-              {project.plan_end_date && <span>📅 До: {project.plan_end_date}</span>}
-              {project.manager_name && <span className="truncate">👤 {project.manager_name}</span>}
-            </div>
-
-            <div className="flex justify-between items-center border-t border-gray-50 pt-4 mt-auto">
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-gray-100 text-gray-500 rounded">{getVisibilityLabel(project.visibility)}</span>
-              <Link to={`/projects/${project.id}`} className="text-blue-600 hover:text-blue-800 text-sm font-bold">Открыть →</Link>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* МОДАЛКА СОЗДАНИЯ ПРОЕКТА */}
       {isModalOpen && (
@@ -209,7 +240,7 @@ function Projects() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Название *</label>
-                    <input type="text" value={newProjectTitle} onChange={(e) => setNewProjectTitle(e.target.value)} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required />
+                    <input type="text" value={newProjectTitle} onChange={(e) => setNewProjectTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label>
@@ -223,7 +254,7 @@ function Projects() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Описание</label>
-                    <textarea value={newProjectDescription} onChange={(e) => setNewProjectDescription(e.target.value)} className="w-full px-4 py-2 border rounded-lg min-h-[80px] outline-none" />
+                    <textarea value={newProjectDescription} onChange={(e) => setNewProjectDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg min-h-[80px] outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
 
@@ -231,17 +262,17 @@ function Projects() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-gray-500 mb-1">Начало</label>
-                      <input type="date" value={planStartDate} onChange={(e) => setPlanStartDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                      <input type="date" value={planStartDate} onChange={(e) => setPlanStartDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-500 mb-1">Дедлайн</label>
-                      <input type="date" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                      <input type="date" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                   </div>
 
                   <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                     <label className="block text-sm font-bold text-blue-800 mb-2">Видимость</label>
-                    <select value={visibility} onChange={(e) => setVisibility(e.target.value)} className="w-full px-4 py-2 border border-blue-200 rounded-lg bg-white mb-4">
+                    <select value={visibility} onChange={(e) => setVisibility(e.target.value)} className="w-full px-4 py-2 border border-blue-200 rounded-lg bg-white mb-4 outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="all">🌍 Все</option>
                       <option value="department">🏢 Отдел</option>
                       <option value="selected">👥 Выбранные</option>
@@ -262,8 +293,8 @@ function Projects() {
                   </div>
                 </div>
               </div>
-              <div className="flex justify-end space-x-3 pt-6 border-t">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Отмена</button>
+              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-100 mt-8">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
                 <button type="submit" className="px-6 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-bold shadow-md transition-colors">Создать проект</button>
               </div>
             </form>
@@ -281,7 +312,7 @@ function Projects() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Название *</label>
-                    <input type="text" value={editProjectTitle} onChange={(e) => setEditProjectTitle(e.target.value)} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required />
+                    <input type="text" value={editProjectTitle} onChange={(e) => setEditProjectTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label>
@@ -296,7 +327,7 @@ function Projects() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Описание</label>
-                    <textarea value={editProjectDescription} onChange={(e) => setEditProjectDescription(e.target.value)} className="w-full px-4 py-2 border rounded-lg min-h-[80px] outline-none" />
+                    <textarea value={editProjectDescription} onChange={(e) => setEditProjectDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg min-h-[80px] outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
 
@@ -304,17 +335,17 @@ function Projects() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-gray-500 mb-1">Начало</label>
-                      <input type="date" value={editPlanStartDate} onChange={(e) => setEditPlanStartDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                      <input type="date" value={editPlanStartDate} onChange={(e) => setEditPlanStartDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-500 mb-1">Дедлайн</label>
-                      <input type="date" value={editPlanEndDate} onChange={(e) => setEditPlanEndDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                      <input type="date" value={editPlanEndDate} onChange={(e) => setEditPlanEndDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                   </div>
 
                   <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                     <label className="block text-sm font-bold text-blue-800 mb-2">Видимость</label>
-                    <select value={editVisibility} onChange={(e) => setEditVisibility(e.target.value)} className="w-full px-4 py-2 border border-blue-200 rounded-lg bg-white mb-4">
+                    <select value={editVisibility} onChange={(e) => setEditVisibility(e.target.value)} className="w-full px-4 py-2 border border-blue-200 rounded-lg bg-white mb-4 outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="all">🌍 Все</option>
                       <option value="department">🏢 Отдел</option>
                       <option value="selected">👥 Выбранные</option>
@@ -336,8 +367,8 @@ function Projects() {
                   </div>
                 </div>
               </div>
-              <div className="flex justify-end space-x-3 pt-6 border-t">
-                <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-6 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Отмена</button>
+              <div className="flex justify-end space-x-3 pt-6 border-t border-gray-100 mt-8">
+                <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-6 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
                 <button type="submit" className="px-6 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-bold shadow-md transition-colors">Сохранить</button>
               </div>
             </form>

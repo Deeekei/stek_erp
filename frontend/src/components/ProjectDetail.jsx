@@ -17,10 +17,12 @@ function ProjectDetail() {
   const lastY = useRef(0);
   const scrollContainerRef = useRef(null);
 
+  // ОПТИМИЗАЦИЯ ФРОНТЕНДА: Разделяем стейты загрузки
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingProject, setLoadingProject] = useState(true);
+  const [loadingTasks, setLoadingTasks] = useState(true);
 
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -36,7 +38,6 @@ function ProjectDetail() {
   const [ganttZoom, setGanttZoom] = useState(ViewMode.Day);
   const [collapsedTasks, setCollapsedTasks] = useState([]);
 
-  // Модалки Задач
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
@@ -57,26 +58,25 @@ function ProjectDetail() {
   const [taskToComplete, setTaskToComplete] = useState(null);
   const [completionDelayReason, setCompletionDelayReason] = useState('');
 
-  // Модалка Редактирования Проекта
   const [isProjectEditModalOpen, setIsProjectEditModalOpen] = useState(false);
   const [editProjectTitle, setEditProjectTitle] = useState('');
 
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
-    fetchData();
+    fetchProjectAndUsers();
+    fetchTasks();
   }, [id]);
 
-  const fetchData = async () => {
+  // АСИНХРОННАЯ ЗАГРУЗКА 1: Проект и пользователи (загружаются мгновенно)
+  const fetchProjectAndUsers = async () => {
     try {
-      const [projectRes, tasksRes, usersRes] = await Promise.all([
+      const [projectRes, usersRes] = await Promise.all([
         api.get(`projects/${id}/`),
-        api.get(`tasks/?project=${id}`),
         api.get(`users/`).catch(() => ({ data: [] }))
       ]);
 
       setProject(projectRes.data);
-      setTasks(tasksRes.data);
 
       const usersArray = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data?.results || []);
       setUsers(usersArray);
@@ -100,9 +100,24 @@ function ProjectDetail() {
           console.error("Auth error:", e);
         }
       }
-      setLoading(false);
+      setLoadingProject(false);
     } catch (error) {
-      setLoading(false);
+      setLoadingProject(false);
+    }
+  };
+
+  // АСИНХРОННАЯ ЗАГРУЗКА 2: Задачи (загружаются отдельно, не блокируя интерфейс)
+  const fetchTasks = async () => {
+    try {
+      setLoadingTasks(true);
+      const tasksRes = await api.get(`tasks/?project=${id}`);
+      // Поддержка на случай если когда-то мы добавим пагинацию
+      const tasksData = tasksRes.data.results || tasksRes.data;
+      setTasks(tasksData);
+      setLoadingTasks(false);
+    } catch (error) {
+      console.error("Ошибка загрузки задач:", error);
+      setLoadingTasks(false);
     }
   };
 
@@ -142,13 +157,13 @@ function ProjectDetail() {
     const endpoint = extension === 'xml' ? 'import_xml/' : 'import_csv/';
 
     try {
-      setLoading(true);
+      setLoadingTasks(true); // Показываем спиннер задач
       await api.post(`projects/${id}/${endpoint}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       alert("Структура задач успешно загружена!");
-      fetchData();
+      fetchTasks(); // Обновляем только задачи
     } catch (error) {
       alert(`Ошибка при импорте: ${error.response?.data?.error || 'Проверьте формат файла'}`);
-      setLoading(false);
+      setLoadingTasks(false);
     } finally {
       e.target.value = '';
     }
@@ -239,13 +254,10 @@ function ProjectDetail() {
     const handleMouseMove = (e) => {
       if (!isDragging.current) return;
       e.preventDefault();
-
       const deltaX = e.pageX - lastX.current;
       const deltaY = e.pageY - lastY.current;
-
       if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft -= deltaX;
       if (ganttContainerRef.current) ganttContainerRef.current.scrollTop -= deltaY;
-
       lastX.current = e.pageX;
       lastY.current = e.pageY;
     };
@@ -260,7 +272,6 @@ function ProjectDetail() {
 
     window.addEventListener('mousemove', handleMouseMove, { passive: false });
     window.addEventListener('mouseup', handleMouseUp);
-
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
@@ -269,10 +280,8 @@ function ProjectDetail() {
 
   const handleGanttPointerDown = (e) => {
     if (e.button !== 0) return;
-
     const outerContainer = ganttContainerRef.current;
     if (!outerContainer) return;
-
     const svg = outerContainer.querySelector('svg');
     const innerScrollContainer = svg?.parentElement;
 
@@ -292,7 +301,6 @@ function ProjectDetail() {
     lastX.current = e.pageX;
     lastY.current = e.pageY;
     scrollContainerRef.current = innerScrollContainer;
-
     outerContainer.style.cursor = 'grabbing';
     if (innerScrollContainer) innerScrollContainer.style.cursor = 'grabbing';
     document.body.style.userSelect = 'none';
@@ -331,7 +339,6 @@ function ProjectDetail() {
 
           const isFolder = rt.type === 'project';
           const originalTask = tasks.find(t => t.id.toString() === rt.id);
-
           const isOverdue = originalTask && originalTask.plan_end_date < today && originalTask.status !== 'completed';
 
           return (
@@ -383,7 +390,7 @@ function ProjectDetail() {
       setTasks(prevTasks => prevTasks.map(t => t.id === Number(ganttTask.id) ? response.data : t));
     } catch (error) {
       alert("Ошибка сохранения");
-      fetchData();
+      fetchTasks();
     }
   };
 
@@ -408,7 +415,7 @@ function ProjectDetail() {
     }
 
     setTasks(prevTasks => prevTasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-    try { await api.patch(`tasks/${taskId}/`, { status: newStatus }); } catch (error) { fetchData(); }
+    try { await api.patch(`tasks/${taskId}/`, { status: newStatus }); } catch (error) { fetchTasks(); }
   };
 
   const handleConfirmCompletion = async (e) => {
@@ -423,7 +430,7 @@ function ProjectDetail() {
       setTaskToComplete(null);
       setCompletionDelayReason('');
     }
-    catch (error) { fetchData(); }
+    catch (error) { fetchTasks(); }
   };
 
   const handleCreateTask = async (e) => {
@@ -489,22 +496,16 @@ function ProjectDetail() {
     catch (error) { alert("Ошибка сохранения"); }
   };
 
-  // ОПТИМИЗИРОВАНО: Мгновенное удаление задачи с экрана
   const handleQuickDelete = async (taskId) => {
     if (!window.confirm("Удалить задачу?")) return;
-
     const numericId = Number(taskId);
-
-    // Сначала мгновенно убираем из стейта
     setTasks(prevTasks => prevTasks.filter(t => t.id !== numericId));
     setIsEditModalOpen(false);
-
     try {
-      // Затем тихо отправляем запрос на сервер
       await api.delete(`tasks/${numericId}/`);
     } catch (error) {
       alert("Не удалось удалить задачу на сервере.");
-      fetchData(); // Восстанавливаем данные при ошибке
+      fetchTasks();
     }
   };
 
@@ -552,7 +553,7 @@ function ProjectDetail() {
     { id: 'completed', title: 'Завершены', color: 'border-green-200 bg-green-50' }
   ];
 
-  if (loading) return <div className="p-4 sm:p-12 text-center text-gray-500 font-medium">Загрузка данных проекта...</div>;
+  if (loadingProject) return <div className="p-4 sm:p-12 text-center text-gray-500 font-medium">Загрузка интерфейса проекта...</div>;
   if (!project) return <div className="p-4 sm:p-12 text-center text-red-500">Проект не найден.</div>;
 
   return (
@@ -586,82 +587,91 @@ function ProjectDetail() {
         </div>
       </div>
 
-      {currentView === 'board' && (
-        <DragDropContext onDragEnd={handleDragEnd}>
-          <div className="flex gap-6 overflow-x-auto pb-4 flex-1 items-start">
-            {kanbanColumns.map(column => {
-              const columnTasks = tasks.filter(task => task.status === column.id);
-              return (
-                <div key={column.id} className={`flex flex-col flex-shrink-0 w-72 sm:w-80 rounded-xl border ${column.color} max-h-full`}>
-                  <div className="p-3 sm:p-4 font-bold text-gray-700 flex justify-between items-center border-b border-black/5">
-                    {column.title} <span className="bg-white/60 px-2 py-0.5 rounded text-sm text-gray-500">{columnTasks.length}</span>
-                  </div>
-                  <Droppable droppableId={column.id}>
-                    {(provided) => (
-                      <div ref={provided.innerRef} {...provided.droppableProps} className="p-2 sm:p-3 flex-1 overflow-y-auto min-h-[200px]">
-                        {columnTasks.map((task, index) => {
-                          const isOverdue = task.plan_end_date < today && task.status !== 'completed';
-                          return (
-                            <Draggable key={task.id.toString()} draggableId={task.id.toString()} index={index}>
-                              {(provided) => (
-                                <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} onClick={() => handleTaskClick(task)} className={`bg-white p-3 sm:p-4 mb-3 rounded-lg shadow-sm border ${isOverdue ? 'border-red-300 bg-red-50' : 'border-gray-100'} cursor-pointer hover:shadow-md transition-all`}>
-                                  <div className="flex justify-between items-start mb-2">
-                                    <div className="flex space-x-1">
-                                      <span className={`px-2 py-0.5 text-[10px] uppercase rounded ${task.priority === 'low' ? 'bg-green-100 text-green-700' : task.priority === 'high' ? 'bg-purple-100 text-purple-700 font-bold' : task.priority === 'critical' ? 'bg-red-100 text-red-700 font-bold' : 'bg-blue-100 text-blue-700'}`}>
-                                        {task.priority === 'low' ? '🟢' : task.priority === 'medium' ? '🔵' : task.priority === 'high' ? '🟣' : '🔴'}
-                                      </span>
-                                    </div>
-                                    <span className="text-gray-400 text-xs shrink-0 ml-2">#{task.id}</span>
-                                  </div>
-                                  <h4 className="font-semibold text-gray-800 text-sm mb-1 break-words">{task.title}</h4>
-                                  <div className="flex justify-between text-xs text-gray-500 font-medium mt-2">
-                                    <div className={isOverdue ? 'text-red-500 font-bold' : ''}>⏳ {task.plan_end_date}</div>
-                                    {task.comments?.length > 0 && <div>💬 {task.comments.length}</div>}
-                                  </div>
-                                </div>
-                              )}
-                            </Draggable>
-                          )
-                        })}
-                        {provided.placeholder}
-                      </div>
-                    )}
-                  </Droppable>
-                </div>
-              );
-            })}
-          </div>
-        </DragDropContext>
-      )}
-
-      {currentView === 'gantt' && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 flex-1 overflow-hidden flex flex-col relative">
-           <div className="mb-3 sm:mb-4 flex justify-end gap-2 overflow-x-auto pb-1">
-            <button onClick={() => setGanttZoom(ViewMode.Day)} className={`px-3 py-1 text-xs sm:text-sm rounded whitespace-nowrap ${ganttZoom === ViewMode.Day ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Дни</button>
-            <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded whitespace-nowrap ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
-            <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded whitespace-nowrap ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
-          </div>
-
-          <div
-            className="flex-1 overflow-auto relative select-none"
-            ref={ganttContainerRef}
-            onPointerDownCapture={handleGanttPointerDown}
-            onWheelCapture={handleGanttWheel}
-          >
-            {ganttTasks.length > 0 ? (
-              <Gantt
-                tasks={ganttTasks}
-                viewMode={ganttZoom}
-                onDateChange={handleGanttDateChange}
-                onExpanderClick={handleExpanderClick}
-                TaskListHeader={CustomTaskListHeader}
-                TaskListTable={CustomTaskListTable}
-                listCellWidth={isMobile ? 180 : 380}
-                locale="ru"
-              />
-            ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
-          </div>
+      {loadingTasks ? (
+        <div className="flex-1 flex items-center justify-center text-gray-400">
+           <svg className="animate-spin h-8 w-8 text-blue-600 mr-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+           Загружаем задачи...
         </div>
+      ) : (
+        <>
+          {currentView === 'board' && (
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <div className="flex gap-6 overflow-x-auto pb-4 flex-1 items-start">
+                {kanbanColumns.map(column => {
+                  const columnTasks = tasks.filter(task => task.status === column.id);
+                  return (
+                    <div key={column.id} className={`flex flex-col flex-shrink-0 w-72 sm:w-80 rounded-xl border ${column.color} max-h-full`}>
+                      <div className="p-3 sm:p-4 font-bold text-gray-700 flex justify-between items-center border-b border-black/5">
+                        {column.title} <span className="bg-white/60 px-2 py-0.5 rounded text-sm text-gray-500">{columnTasks.length}</span>
+                      </div>
+                      <Droppable droppableId={column.id}>
+                        {(provided) => (
+                          <div ref={provided.innerRef} {...provided.droppableProps} className="p-2 sm:p-3 flex-1 overflow-y-auto min-h-[200px]">
+                            {columnTasks.map((task, index) => {
+                              const isOverdue = task.plan_end_date < today && task.status !== 'completed';
+                              return (
+                                <Draggable key={task.id.toString()} draggableId={task.id.toString()} index={index}>
+                                  {(provided) => (
+                                    <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} onClick={() => handleTaskClick(task)} className={`bg-white p-3 sm:p-4 mb-3 rounded-lg shadow-sm border ${isOverdue ? 'border-red-300 bg-red-50' : 'border-gray-100'} cursor-pointer hover:shadow-md transition-all`}>
+                                      <div className="flex justify-between items-start mb-2">
+                                        <div className="flex space-x-1">
+                                          <span className={`px-2 py-0.5 text-[10px] uppercase rounded ${task.priority === 'low' ? 'bg-green-100 text-green-700' : task.priority === 'high' ? 'bg-purple-100 text-purple-700 font-bold' : task.priority === 'critical' ? 'bg-red-100 text-red-700 font-bold' : 'bg-blue-100 text-blue-700'}`}>
+                                            {task.priority === 'low' ? '🟢' : task.priority === 'medium' ? '🔵' : task.priority === 'high' ? '🟣' : '🔴'}
+                                          </span>
+                                        </div>
+                                        <span className="text-gray-400 text-xs shrink-0 ml-2">#{task.id}</span>
+                                      </div>
+                                      <h4 className="font-semibold text-gray-800 text-sm mb-1 break-words">{task.title}</h4>
+                                      <div className="flex justify-between text-xs text-gray-500 font-medium mt-2">
+                                        <div className={isOverdue ? 'text-red-500 font-bold' : ''}>⏳ {task.plan_end_date}</div>
+                                        {task.comments?.length > 0 && <div>💬 {task.comments.length}</div>}
+                                      </div>
+                                    </div>
+                                  )}
+                                </Draggable>
+                              )
+                            })}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+                    </div>
+                  );
+                })}
+              </div>
+            </DragDropContext>
+          )}
+
+          {currentView === 'gantt' && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 flex-1 overflow-hidden flex flex-col relative">
+              <div className="mb-3 sm:mb-4 flex justify-end gap-2 overflow-x-auto pb-1">
+                <button onClick={() => setGanttZoom(ViewMode.Day)} className={`px-3 py-1 text-xs sm:text-sm rounded whitespace-nowrap ${ganttZoom === ViewMode.Day ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Дни</button>
+                <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded whitespace-nowrap ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
+                <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded whitespace-nowrap ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
+              </div>
+
+              <div
+                className="flex-1 overflow-auto relative select-none"
+                ref={ganttContainerRef}
+                onPointerDownCapture={handleGanttPointerDown}
+                onWheelCapture={handleGanttWheel}
+              >
+                {ganttTasks.length > 0 ? (
+                  <Gantt
+                    tasks={ganttTasks}
+                    viewMode={ganttZoom}
+                    onDateChange={handleGanttDateChange}
+                    onExpanderClick={handleExpanderClick}
+                    TaskListHeader={CustomTaskListHeader}
+                    TaskListTable={CustomTaskListTable}
+                    listCellWidth={isMobile ? 180 : 380}
+                    locale="ru"
+                  />
+                ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* --- МОДАЛКА РЕДАКТИРОВАНИЯ ПРОЕКТА --- */}
