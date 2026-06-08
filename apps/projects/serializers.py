@@ -53,7 +53,6 @@ class TaskSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 class ProjectSerializer(serializers.ModelSerializer):
-    tasks = TaskSerializer(many=True, read_only=True)
     class Meta:
         model = Project
         fields = '__all__'
