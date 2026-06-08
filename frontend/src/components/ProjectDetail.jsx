@@ -57,10 +57,6 @@ function ProjectDetail() {
   const [taskToComplete, setTaskToComplete] = useState(null);
   const [completionDelayReason, setCompletionDelayReason] = useState('');
 
-  // Модалка Редактирования Проекта
-  const [isProjectEditModalOpen, setIsProjectEditModalOpen] = useState(false);
-  const [editProjectTitle, setEditProjectTitle] = useState('');
-
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
@@ -103,18 +99,6 @@ function ProjectDetail() {
       setLoading(false);
     } catch (error) {
       setLoading(false);
-    }
-  };
-
-  const handleUpdateProject = async (e) => {
-    e.preventDefault();
-    if (!editProjectTitle.trim()) return alert("Название проекта не может быть пустым.");
-    try {
-      const response = await api.patch(`projects/${id}/`, { title: editProjectTitle });
-      setProject(response.data); // Оптимистичное обновление без перезагрузки
-      setIsProjectEditModalOpen(false);
-    } catch (error) {
-      alert("Ошибка при обновлении проекта.");
     }
   };
 
@@ -429,7 +413,6 @@ function ProjectDetail() {
   const handleCreateTask = async (e) => {
     e.preventDefault();
 
-    // ВАЛИДАЦИЯ ДАТ ПРИ СОЗДАНИИ
     if (!newTaskPlanStart || !newTaskPlanEnd) {
       return alert("Необходимо указать дату начала и дедлайн задачи.");
     }
@@ -469,7 +452,6 @@ function ProjectDetail() {
   const handleUpdateTask = async (e) => {
     e.preventDefault();
 
-    // ВАЛИДАЦИЯ ДАТ ПРИ РЕДАКТИРОВАНИИ
     if (!editFormData.plan_start_date || !editFormData.plan_end_date) {
       return alert("Необходимо указать дату начала и дедлайн задачи.");
     }
@@ -556,15 +538,6 @@ function ProjectDetail() {
           {isFullAccess && (
             <>
               <button onClick={() => fileInputRef.current.click()} className="flex-1 sm:flex-none px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap">📥 Импорт</button>
-
-              {/* КНОПКА РЕДАКТИРОВАНИЯ ПРОЕКТА */}
-              <button
-                onClick={() => { setEditProjectTitle(project.title); setIsProjectEditModalOpen(true); }}
-                className="flex-1 sm:flex-none px-4 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap"
-              >
-                ✏️ Изменить
-              </button>
-
               <button onClick={handleDeleteProject} className="flex-1 sm:flex-none px-4 py-2 border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap">🗑️ Удалить</button>
             </>
           )}
@@ -650,31 +623,6 @@ function ProjectDetail() {
                 locale="ru"
               />
             ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
-          </div>
-        </div>
-      )}
-
-      {/* --- МОДАЛКА РЕДАКТИРОВАНИЯ ПРОЕКТА --- */}
-      {isProjectEditModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsProjectEditModalOpen(false); }}>
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
-            <h3 className="text-xl font-bold text-gray-800 mb-4">Изменить проект</h3>
-            <form onSubmit={handleUpdateProject}>
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Название проекта</label>
-                <input
-                  type="text"
-                  value={editProjectTitle}
-                  onChange={(e) => setEditProjectTitle(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div className="flex justify-end gap-3">
-                <button type="button" onClick={() => setIsProjectEditModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
-                <button type="submit" className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-medium shadow-md transition-colors">Сохранить</button>
-              </div>
-            </form>
           </div>
         </div>
       )}
