@@ -5,7 +5,7 @@ from .views import EmployeeReportView, ProjectReportView, AttachmentViewSet, New
 
 
 router = DefaultRouter()
-router.register('tasks', TaskViewSet)
+router.register('tasks', TaskViewSet, basename='task')
 router.register('projects', ProjectViewSet, basename='project')
 router.register(r'attachments', AttachmentViewSet)
 router.register(r'news', NewsViewSet, basename='news')
