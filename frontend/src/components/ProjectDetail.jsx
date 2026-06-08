@@ -47,7 +47,7 @@ function ProjectDetail() {
   const [newTaskPlanEnd, setNewTaskPlanEnd] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
   const [newTaskParent, setNewTaskParent] = useState('');
-  const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]); // <-- ДОБАВЛЕНО ДЛЯ СВЯЗЕЙ
+  const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -130,7 +130,7 @@ function ProjectDetail() {
       setLoading(true);
       await api.post(`projects/${id}/${endpoint}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       alert("Структура задач успешно загружена!");
-      fetchData();
+      fetchData(); // Тут рефреш оправдан, так как заливается весь проект разом
     } catch (error) {
       alert(`Ошибка при импорте: ${error.response?.data?.error || 'Проверьте формат файла'}`);
       setLoading(false);
@@ -147,7 +147,6 @@ function ProjectDetail() {
     return { value: u.id, label: fullName || directName || u.username || u.email || `Сотрудник №${u.id}` };
   });
 
-  // <-- ДОБАВЛЕНО: Готовим список задач для выпадающего меню связей -->
   const taskSelectOptions = tasks.map(t => ({
     value: t.id,
     label: `#${t.id} ${t.title}`
@@ -203,7 +202,6 @@ function ProjectDetail() {
     .filter(t => t.plan_start_date && t.plan_end_date && !isTaskHidden(t))
     .map(t => {
       const pId = getParentId(t);
-      // Поддержка как dependencies, так и linked_tasks для диаграммы Ганта
       const depsArray = t.linked_tasks || t.dependencies || [];
       const predecessors = depsArray.map(dep_id => dep_id.toString());
       const isParent = tasks.some(child => getParentId(child) == t.id);
@@ -350,10 +348,17 @@ function ProjectDetail() {
     );
   };
 
+  // ОПТИМИЗИРОВАНО: Обновление даты в Ганте без лишних запросов
   const handleGanttDateChange = async (ganttTask) => {
     if (!isFullAccess) return alert("У вас нет прав для изменения сроков.");
     const payload = { plan_start_date: ganttTask.start.toISOString().split('T')[0], plan_end_date: ganttTask.end.toISOString().split('T')[0] };
-    try { await api.patch(`tasks/${ganttTask.id}/`, payload); fetchData(); } catch (error) { alert("Ошибка сохранения"); fetchData(); }
+    try {
+      const response = await api.patch(`tasks/${ganttTask.id}/`, payload);
+      setTasks(prevTasks => prevTasks.map(t => t.id === Number(ganttTask.id) ? response.data : t));
+    } catch (error) {
+      alert("Ошибка сохранения");
+      fetchData(); // Страховка при ошибке сети
+    }
   };
 
   const handleDragEnd = async (result) => {
@@ -380,28 +385,36 @@ function ProjectDetail() {
     try { await api.patch(`tasks/${taskId}/`, { status: newStatus }); } catch (error) { fetchData(); }
   };
 
+  // ОПТИМИЗИРОВАНО: Завершение просроченной задачи без моргания
   const handleConfirmCompletion = async (e) => {
     e.preventDefault();
     if (!completionDelayReason.trim()) return alert("Укажите причину просрочки!");
     const payload = { status: 'completed', delay_reason: completionDelayReason, actual_end_date: today };
     setTasks(prevTasks => prevTasks.map(t => t.id === taskToComplete.id ? { ...t, ...payload } : t));
     setIsCompletionModalOpen(false);
-    try { await api.patch(`tasks/${taskToComplete.id}/`, payload); setTaskToComplete(null); setCompletionDelayReason(''); fetchData(); }
+    try {
+      const response = await api.patch(`tasks/${taskToComplete.id}/`, payload);
+      setTasks(prevTasks => prevTasks.map(t => t.id === taskToComplete.id ? response.data : t));
+      setTaskToComplete(null);
+      setCompletionDelayReason('');
+    }
     catch (error) { fetchData(); }
   };
 
+  // ОПТИМИЗИРОВАНО: Создание задачи
   const handleCreateTask = async (e) => {
     e.preventDefault();
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
       project: parseInt(id), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee,
       parent_task: newTaskParent ? parseInt(newTaskParent) : null,
-      linked_tasks: newTaskLinkedTasks // <-- ОТПРАВЛЯЕМ СВЯЗИ НА БЭКЕНД
+      linked_tasks: newTaskLinkedTasks
     };
     if (newTaskPlanStart) payload.plan_start_date = newTaskPlanStart;
     try {
-      await api.post('tasks/', payload); fetchData(); setIsTaskModalOpen(false);
-      // Очищаем форму
+      const response = await api.post('tasks/', payload);
+      setTasks(prevTasks => [...prevTasks, response.data]);
+      setIsTaskModalOpen(false);
       setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd('');
       setNewTaskAssignee(null); setNewTaskParent(''); setNewTaskLinkedTasks([]);
     } catch (error) { alert(`Ошибка: ${JSON.stringify(error.response?.data)}`); }
@@ -410,18 +423,17 @@ function ProjectDetail() {
   const handleTaskClick = (task) => {
     setEditingTask(task);
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
-
-    // <-- ДОБАВЛЕНО: Чтение связей при открытии модалки -->
     const depsArray = task.linked_tasks || task.dependencies || [];
 
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
       plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium',
-      linked_tasks: depsArray // <-- ЗАГРУЖАЕМ СВЯЗИ
+      linked_tasks: depsArray
     });
     setNewCommentText(''); setIsEditModalOpen(true);
   };
 
+  // ОПТИМИЗИРОВАНО: Редактирование задачи
   const handleUpdateTask = async (e) => {
     e.preventDefault();
     const isOverdue = editingTask.plan_end_date && editingTask.plan_end_date < today;
@@ -430,7 +442,12 @@ function ProjectDetail() {
     }
     const payload = { ...editFormData };
     if (!payload.plan_start_date) payload.plan_start_date = null;
-    try { await api.patch(`tasks/${editingTask.id}/`, payload); fetchData(); setIsEditModalOpen(false); setEditingTask(null); }
+    try {
+      const response = await api.patch(`tasks/${editingTask.id}/`, payload);
+      setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
+      setIsEditModalOpen(false);
+      setEditingTask(null);
+    }
     catch (error) { alert("Ошибка сохранения"); }
   };
 
@@ -613,7 +630,6 @@ function ProjectDetail() {
                         <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
                       </div>
 
-                      {/* <-- ДОБАВЛЕНО ПОЛЕ ВЫБОРА СВЯЗЕЙ В РЕДАКТИРОВАНИИ --> */}
                       <div className="sm:col-span-2">
                         <label className="block text-sm text-gray-700 mb-1">Связанные задачи (зависят от текущей)</label>
                         <Select
@@ -748,7 +764,6 @@ function ProjectDetail() {
                   <Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                 </div>
 
-                {/* <-- ДОБАВЛЕНО ПОЛЕ ВЫБОРА СВЯЗЕЙ В СОЗДАНИИ --> */}
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Связанные задачи (зависят от текущей)</label>
                   <Select
