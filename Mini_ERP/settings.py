@@ -50,6 +50,12 @@ MIDDLEWARE = [
 CORS_ALLOW_ALL_ORIGINS = True
 ROOT_URLCONF = 'Mini_ERP.urls'
 
+CSRF_TRUSTED_ORIGINS = [
+    "http://186.246.7.109:8080",
+    "http://186.246.7.109", # На случай, если уберешь порт 8080
+    # Если позже прикрутишь домен, обязательно добавь его сюда, например:
+    # "https://erp.tvoy-domen.ru",
+]
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',

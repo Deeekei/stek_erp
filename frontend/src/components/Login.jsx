@@ -12,7 +12,7 @@ function Login({ onLoginSuccess }) {
 
     try {
       // Стучимся в наш API за токеном
-      const response = await axios.post('http://127.0.0.1:8000/api/token/', {
+      const response = await axios.post('/api/token/', {
         username,
         password,
       });
