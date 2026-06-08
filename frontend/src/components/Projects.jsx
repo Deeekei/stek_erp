@@ -44,7 +44,7 @@ function Projects() {
   // Преобразуем список юзеров для React-Select
   const userOptions = users.map(u => ({
     value: u.id,
-    label: u.full_name || u.username
+    label: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username
   }));
 
   const handleCreateProject = async (e) => {

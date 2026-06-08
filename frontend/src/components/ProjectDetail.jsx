@@ -47,6 +47,7 @@ function ProjectDetail() {
   const [newTaskPlanEnd, setNewTaskPlanEnd] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
   const [newTaskParent, setNewTaskParent] = useState('');
+  const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]); // <-- ДОБАВЛЕНО ДЛЯ СВЯЗЕЙ
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -146,6 +147,12 @@ function ProjectDetail() {
     return { value: u.id, label: fullName || directName || u.username || u.email || `Сотрудник №${u.id}` };
   });
 
+  // <-- ДОБАВЛЕНО: Готовим список задач для выпадающего меню связей -->
+  const taskSelectOptions = tasks.map(t => ({
+    value: t.id,
+    label: `#${t.id} ${t.title}`
+  }));
+
   const getParentId = (task) => {
     if (!task || !task.parent_task) return null;
     return typeof task.parent_task === 'object' ? task.parent_task.id : task.parent_task;
@@ -196,7 +203,9 @@ function ProjectDetail() {
     .filter(t => t.plan_start_date && t.plan_end_date && !isTaskHidden(t))
     .map(t => {
       const pId = getParentId(t);
-      const predecessors = t.dependencies ? t.dependencies.map(dep_id => dep_id.toString()) : [];
+      // Поддержка как dependencies, так и linked_tasks для диаграммы Ганта
+      const depsArray = t.linked_tasks || t.dependencies || [];
+      const predecessors = depsArray.map(dep_id => dep_id.toString());
       const isParent = tasks.some(child => getParentId(child) == t.id);
 
       return {
@@ -386,21 +395,29 @@ function ProjectDetail() {
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
       project: parseInt(id), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee,
-      parent_task: newTaskParent ? parseInt(newTaskParent) : null
+      parent_task: newTaskParent ? parseInt(newTaskParent) : null,
+      linked_tasks: newTaskLinkedTasks // <-- ОТПРАВЛЯЕМ СВЯЗИ НА БЭКЕНД
     };
     if (newTaskPlanStart) payload.plan_start_date = newTaskPlanStart;
     try {
       await api.post('tasks/', payload); fetchData(); setIsTaskModalOpen(false);
-      setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd(''); setNewTaskAssignee(null); setNewTaskParent('');
+      // Очищаем форму
+      setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd('');
+      setNewTaskAssignee(null); setNewTaskParent(''); setNewTaskLinkedTasks([]);
     } catch (error) { alert(`Ошибка: ${JSON.stringify(error.response?.data)}`); }
   };
 
   const handleTaskClick = (task) => {
     setEditingTask(task);
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
+
+    // <-- ДОБАВЛЕНО: Чтение связей при открытии модалки -->
+    const depsArray = task.linked_tasks || task.dependencies || [];
+
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
-      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium'
+      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium',
+      linked_tasks: depsArray // <-- ЗАГРУЖАЕМ СВЯЗИ
     });
     setNewCommentText(''); setIsEditModalOpen(true);
   };
@@ -563,7 +580,7 @@ function ProjectDetail() {
                 onExpanderClick={handleExpanderClick}
                 TaskListHeader={CustomTaskListHeader}
                 TaskListTable={CustomTaskListTable}
-                listCellWidth={isMobile ? 180 : 380} // УМЕНЬШАЕМ КОЛОНКУ НА МОБИЛЬНЫХ
+                listCellWidth={isMobile ? 180 : 380}
                 locale="ru"
               />
             ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
@@ -595,6 +612,22 @@ function ProjectDetail() {
                         <label className="block text-sm text-gray-700 mb-1">Статус</label>
                         <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
                       </div>
+
+                      {/* <-- ДОБАВЛЕНО ПОЛЕ ВЫБОРА СВЯЗЕЙ В РЕДАКТИРОВАНИИ --> */}
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm text-gray-700 mb-1">Связанные задачи (зависят от текущей)</label>
+                        <Select
+                          isMulti
+                          options={taskSelectOptions.filter(opt => opt.value !== editingTask.id)}
+                          value={taskSelectOptions.filter(opt => (editFormData.linked_tasks || []).includes(opt.value))}
+                          onChange={(selected) => setEditFormData({...editFormData, linked_tasks: selected ? selected.map(s => s.value) : []})}
+                          placeholder="Добавить связь..."
+                          menuPosition="fixed"
+                          menuPortalTarget={document.body}
+                          styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
+                        />
+                      </div>
+
                       <div className="sm:col-span-2">
                         <label className="block text-sm text-gray-700 mb-1">Критичность</label>
                         <select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
@@ -714,6 +747,22 @@ function ProjectDetail() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label>
                   <Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                 </div>
+
+                {/* <-- ДОБАВЛЕНО ПОЛЕ ВЫБОРА СВЯЗЕЙ В СОЗДАНИИ --> */}
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Связанные задачи (зависят от текущей)</label>
+                  <Select
+                    isMulti
+                    options={taskSelectOptions}
+                    value={taskSelectOptions.filter(o => newTaskLinkedTasks.includes(o.value))}
+                    onChange={(selected) => setNewTaskLinkedTasks(selected ? selected.map(s => s.value) : [])}
+                    placeholder="Выберите задачи..."
+                    menuPosition="fixed"
+                    menuPortalTarget={document.body}
+                    styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
+                  />
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label>
                   <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white">
