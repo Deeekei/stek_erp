@@ -317,8 +317,17 @@ function ProjectDetail() {
           const isFolder = rt.type === 'project';
           const originalTask = tasks.find(t => t.id.toString() === rt.id);
 
+          // Проверяем, просрочена ли задача (дедлайн меньше сегодня и она не завершена)
+          const isOverdue = originalTask && originalTask.plan_end_date < today && originalTask.status !== 'completed';
+
           return (
-            <div key={rt.id} className="flex items-center border-b border-gray-100 px-2 group hover:bg-gray-50 transition-colors" style={{ height: rowHeight }}>
+            <div
+              key={rt.id}
+              className={`flex items-center border-b border-gray-100 px-2 group transition-colors ${
+                isOverdue ? 'bg-red-50/70 hover:bg-red-100/70' : 'bg-white hover:bg-gray-50'
+              }`}
+              style={{ height: rowHeight }}
+            >
               <div style={{ paddingLeft: `${depth * 15}px` }} className="flex items-center flex-1 overflow-hidden truncate">
                 {isFolder ? (
                   <button onClick={() => onExpanderClick(rt)} className="mr-1 text-gray-400 hover:text-gray-800 focus:outline-none w-4 shrink-0">
@@ -327,7 +336,9 @@ function ProjectDetail() {
                 ) : <span className="w-5 shrink-0 inline-block"></span>}
                 <span className="mr-1 sm:mr-2 text-base shrink-0">{isFolder ? '📁' : '📄'}</span>
                 <span
-                  className="truncate font-medium text-gray-700 cursor-pointer hover:text-blue-600 transition-colors text-xs sm:text-[13px]"
+                  className={`truncate cursor-pointer hover:text-blue-600 transition-colors text-xs sm:text-[13px] ${
+                    isFolder ? 'font-bold text-gray-900' : isOverdue ? 'text-red-700 font-medium' : 'font-medium text-gray-700'
+                  }`}
                   onClick={() => originalTask && handleTaskClick(originalTask)}
                   title={rt.name}
                 >
@@ -336,7 +347,9 @@ function ProjectDetail() {
               </div>
 
               {isFullAccess && (
-                <div className="opacity-0 group-hover:opacity-100 flex items-center space-x-1 bg-gray-50 pl-1 sm:pl-2 shrink-0">
+                <div className={`opacity-0 group-hover:opacity-100 flex items-center space-x-1 pl-1 sm:pl-2 shrink-0 ${
+                  isOverdue ? 'bg-red-100/40' : 'bg-gray-50'
+                }`}>
                   <button onClick={(e) => { e.stopPropagation(); setNewTaskParent(rt.id); setIsTaskModalOpen(true); }} className="text-blue-500 hover:bg-blue-100 w-5 sm:w-6 h-5 sm:h-6 rounded flex items-center justify-center font-bold" title="Вложенная задача">➕</button>
                   <button onClick={(e) => { e.stopPropagation(); handleQuickDelete(rt.id); }} className="text-red-500 hover:bg-red-100 w-5 sm:w-6 h-5 sm:h-6 rounded flex items-center justify-center font-bold" title="Удалить">🗑️</button>
                 </div>
