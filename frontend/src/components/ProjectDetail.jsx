@@ -17,7 +17,6 @@ function ProjectDetail() {
   const lastY = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // ОПТИМИЗАЦИЯ ФРОНТЕНДА: Разделяем стейты загрузки
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
@@ -38,6 +37,7 @@ function ProjectDetail() {
   const [ganttZoom, setGanttZoom] = useState(ViewMode.Day);
   const [collapsedTasks, setCollapsedTasks] = useState([]);
 
+  // Модалка новой задачи
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
@@ -48,6 +48,7 @@ function ProjectDetail() {
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
   const [newTaskParent, setNewTaskParent] = useState('');
   const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]);
+  const [newTaskFiles, setNewTaskFiles] = useState([]); // <-- НОВЫЙ СТЕЙТ ДЛЯ ФАЙЛОВ
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -68,7 +69,6 @@ function ProjectDetail() {
     fetchTasks();
   }, [id]);
 
-  // АСИНХРОННАЯ ЗАГРУЗКА 1: Проект и пользователи (загружаются мгновенно)
   const fetchProjectAndUsers = async () => {
     try {
       const [projectRes, usersRes] = await Promise.all([
@@ -106,12 +106,10 @@ function ProjectDetail() {
     }
   };
 
-  // АСИНХРОННАЯ ЗАГРУЗКА 2: Задачи (загружаются отдельно, не блокируя интерфейс)
   const fetchTasks = async () => {
     try {
       setLoadingTasks(true);
       const tasksRes = await api.get(`tasks/?project=${id}`);
-      // Поддержка на случай если когда-то мы добавим пагинацию
       const tasksData = tasksRes.data.results || tasksRes.data;
       setTasks(tasksData);
       setLoadingTasks(false);
@@ -157,10 +155,10 @@ function ProjectDetail() {
     const endpoint = extension === 'xml' ? 'import_xml/' : 'import_csv/';
 
     try {
-      setLoadingTasks(true); // Показываем спиннер задач
+      setLoadingTasks(true);
       await api.post(`projects/${id}/${endpoint}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       alert("Структура задач успешно загружена!");
-      fetchTasks(); // Обновляем только задачи
+      fetchTasks();
     } catch (error) {
       alert(`Ошибка при импорте: ${error.response?.data?.error || 'Проверьте формат файла'}`);
       setLoadingTasks(false);
@@ -433,6 +431,7 @@ function ProjectDetail() {
     catch (error) { fetchTasks(); }
   };
 
+  // --- ОБНОВЛЕНО: Создание задачи вместе с загрузкой файлов ---
   const handleCreateTask = async (e) => {
     e.preventDefault();
 
@@ -451,12 +450,35 @@ function ProjectDetail() {
     };
 
     try {
+      // 1. Создаем саму задачу
       const response = await api.post('tasks/', payload);
-      setTasks(prevTasks => [...prevTasks, response.data]);
+      let createdTask = response.data;
+
+      // 2. Если есть файлы, сразу отправляем их к новой задаче
+      if (newTaskFiles.length > 0) {
+        const uploadedAttachments = [];
+        for (const file of newTaskFiles) {
+          const formData = new FormData();
+          formData.append('file', file);
+          const attRes = await api.post(`tasks/${createdTask.id}/upload_files/`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+          uploadedAttachments.push(attRes.data);
+        }
+        // Прикрепляем файлы к объекту, чтобы они появились в интерфейсе
+        createdTask.attachments = uploadedAttachments;
+      }
+
+      // 3. Обновляем интерфейс
+      setTasks(prevTasks => [...prevTasks, createdTask]);
       setIsTaskModalOpen(false);
+
+      // Сбрасываем форму
       setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd('');
-      setNewTaskAssignee(null); setNewTaskParent(''); setNewTaskLinkedTasks([]);
-    } catch (error) { alert(`Ошибка: ${JSON.stringify(error.response?.data)}`); }
+      setNewTaskAssignee(null); setNewTaskParent(''); setNewTaskLinkedTasks([]); setNewTaskFiles([]);
+    } catch (error) {
+      alert(`Ошибка: ${JSON.stringify(error.response?.data)}`);
+    }
   };
 
   const handleTaskClick = (task) => {
@@ -843,7 +865,7 @@ function ProjectDetail() {
       {isTaskModalOpen && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskParent(''); } }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); } }}
         >
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">{newTaskParent ? 'Новая подзадача' : 'Новая задача'}</h3>
@@ -889,12 +911,33 @@ function ProjectDetail() {
                   <input type="date" value={newTaskPlanEnd} onChange={(e) => setNewTaskPlanEnd(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm outline-none" required />
                 </div>
               </div>
+
+              {/* ПОЛЕ ПРИКРЕПЛЕНИЯ ФАЙЛОВ */}
+              <div className="border border-dashed border-gray-300 p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors">
+                <label className="block text-sm font-bold text-gray-700 mb-2">📎 Прикрепить файлы</label>
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => setNewTaskFiles(Array.from(e.target.files))}
+                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
+                />
+                {newTaskFiles.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {newTaskFiles.map((f, idx) => (
+                      <span key={idx} className="bg-white border border-gray-200 text-xs text-gray-600 px-2.5 py-1 rounded shadow-sm flex items-center">
+                        📄 {f.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Описание</label>
                 <textarea value={newTaskDescription} onChange={(e) => setNewTaskDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none min-h-[80px] break-words"></textarea>
               </div>
               <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-gray-50">
-                <button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskParent(''); }} className="w-full sm:w-auto px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
+                <button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); }} className="w-full sm:w-auto px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
                 <button type="submit" className="w-full sm:w-auto px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-medium shadow-md transition-colors">Создать</button>
               </div>
             </form>
