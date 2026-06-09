@@ -201,7 +201,9 @@ function MyTasks() {
       const updatedTask = { ...editingTask, attachments: editingTask.attachments.filter(att => att.id !== attachmentId) };
       setEditingTask(updatedTask);
       setTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t));
-    } catch (error) { alert("Ошибка при удалении файла."); }
+    } catch (error) {
+      alert("Ошибка при удалении файла.");
+    }
   };
 
   const taskProject = editingTask ? projects.find(p => p.id === editingTask.project) : null;
