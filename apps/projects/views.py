@@ -124,21 +124,18 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        # ОПТИМИЗАЦИЯ БД 1: Подтягиваем владельца и менеджера за 1 запрос
-        base_qs = Project.objects.select_related('owner', 'manager')
+        # Директора и Админы видят ВСЕ проекты (включая Приватные)
+        if user.role in ['admin',] or user.is_superuser:
+            return Project.objects.all().distinct()
 
-        # Администраторы и директора системы видят абсолютно все проекты
-        if user.role in ['admin', 'director'] or user.is_superuser:
-            return base_qs.all()
-
-        q_owner = Q(owner=user)
-        q_all = Q(visibility='all')
-        q_selected = Q(visibility='selected', allowed_users=user)
-
-        my_departments = user.departments.all()
-        q_dept = Q(visibility='department', owner__departments__in=my_departments)
-
-        return base_qs.filter(q_owner | q_all | q_selected | q_dept).distinct()
+        # Для остальных собираем по правилам
+        return Project.objects.filter(
+            Q(owner=user) |  # Создатель
+            Q(manager=user) |  # Ответственный за проект
+            Q(visibility='all') |  # Видят все
+            Q(visibility='department', owner__departments__in=user.departments.all()) |  # Отдел
+            Q(visibility='selected', allowed_users=user)  # Несколько (добавленные пользователи)
+        ).distinct()
 
     @action(detail=True, methods=['post'])
     def import_xml(self, request, pk=None):
@@ -360,17 +357,20 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
+    # Пермишены оставляем твои, но главная "магия" защиты будет в методе update
     permission_classes = [IsAuthenticated, IsManagerOrAdmin, CanEditTaskPermission]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['project']
 
     def get_queryset(self):
+        user = self.request.user
+
         # ОПТИМИЗАЦИЯ БД 2: Убиваем N+1 запросы для задач
-        # Теперь Django достает все связанные данные заранее ОДНИМ запросом
+        # Добавил сюда 'hidden_for' и 'participants' на всякий случай, чтобы они тоже кэшировались
         queryset = Task.objects.select_related(
             'project', 'assignee', 'parent_task'
         ).prefetch_related(
-            'comments', 'attachments', 'dependencies'
+            'comments', 'attachments', 'dependencies', 'participants', 'hidden_for'
         )
 
         # 1. Фильтр по проекту (для страницы проекта)
@@ -378,10 +378,14 @@ class TaskViewSet(viewsets.ModelViewSet):
         if project_id:
             queryset = queryset.filter(project_id=project_id)
 
-        # 2. НОВЫЙ ФИЛЬТР: Только мои задачи (где я ответственный)
+        # 2. ФИЛЬТР: Только мои задачи (где я ответственный)
         assigned_to_me = self.request.query_params.get('assigned_to_me')
         if assigned_to_me == 'true':
-            queryset = queryset.filter(assignee=self.request.user)
+            queryset = queryset.filter(assignee=user)
+
+        # 3. НОВЫЙ ФИЛЬТР: Исключаем задачи, которые участник "смахнул" со своей доски
+        if user.is_authenticated:
+            queryset = queryset.exclude(hidden_for=user)
 
         return queryset.order_by('-created_at')
 
@@ -396,6 +400,64 @@ class TaskViewSet(viewsets.ModelViewSet):
                 title="Новая задача",
                 message=f"Вы назначены исполнителем новой задачи: {task.title}."
             )
+
+    # ==========================================
+    # НОВЫЙ БЛОК: Логика взаимодействия с задачей
+    # ==========================================
+
+    @action(detail=True, methods=['post'])
+    def hide(self, request, pk=None):
+        """
+        Эндпоинт для скрытия задачи.
+        Вызывается фронтендом, когда УЧАСТНИК (не исполнитель) перетаскивает карточку в канбане.
+        """
+        task = self.get_object()
+        task.hidden_for.add(request.user)
+        return Response({'detail': 'Задача успешно скрыта с вашей доски'}, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        """
+        Перехватываем сохранение задачи и жестко проверяем права на уровне полей.
+        """
+        task = self.get_object()
+        user = request.user
+        project = task.project
+
+        # Вычисляем, имеет ли текущий юзер права БОССА для данного проекта
+        is_boss = (
+                user.role in ['admin', 'director'] or
+                user.is_superuser or
+                user == project.owner or
+                user == project.manager or
+                (project.visibility == 'selected' and project.allowed_users.filter(id=user.id).exists())
+        )
+
+        # Если пользователь НЕ босс
+        if not is_boss:
+            if user == task.assignee:
+                # Если это ИСПОЛНИТЕЛЬ: Оставляем в запросе только разрешенные поля.
+                # Все попытки изменить сроки, название или приоритет будут просто проигнорированы.
+                allowed_keys = ['status', 'delay_reason', 'actual_end_date']
+
+                if isinstance(request.data, dict):
+                    # Если данные пришли как обычный JSON
+                    request.data = {k: v for k, v in request.data.items() if k in allowed_keys}
+                else:
+                    # Если данные пришли как FormData (QueryDict, он по умолчанию иммутабельный)
+                    request.data._mutable = True
+                    for key in list(request.data.keys()):
+                        if key not in allowed_keys:
+                            request.data.pop(key)
+                    request.data._mutable = False
+            else:
+                # Если это просто участник (или вообще левый юзер) — запрещаем редактирование тела задачи.
+                # Комментарии и файлы работают через другие эндпоинты, так что они не пострадают.
+                return Response(
+                    {'detail': 'У вас нет прав на редактирование параметров этой задачи.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        return super().update(request, *args, **kwargs)
 
     def perform_update(self, serializer):
         """ Триггер 2: Обновление задачи (смена статуса/сроков) """

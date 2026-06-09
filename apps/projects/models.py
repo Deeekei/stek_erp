@@ -82,6 +82,13 @@ class Task(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата изменения")
     dependencies = models.ManyToManyField('self', symmetrical=False, blank=True, verbose_name="Влияет на задачи")
+
+    hidden_for = models.ManyToManyField(
+        User,
+        related_name='hidden_tasks',
+        blank=True,
+        help_text="Пользователи (участники), которые скрыли эту задачу с доски"
+    )
     class Meta:
         verbose_name = "Задача"
         verbose_name_plural = "Задачи"
