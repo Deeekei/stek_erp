@@ -50,10 +50,12 @@ function Layout({ children, onLogout }) {
     try {
       const response = await api.get('notifications/');
       const data = response.data.results || response.data;
-      setNotifications(data);
-      // Считаем, сколько непрочитанных
-      const unread = data.filter(n => !n.is_read).length;
-      setUnreadCount(unread);
+
+      // СРАЗУ ФИЛЬТРУЕМ: оставляем только непрочитанные
+      const unreadOnly = data.filter(n => !n.is_read);
+
+      setNotifications(unreadOnly);
+      setUnreadCount(unreadOnly.length);
     } catch (error) {
       console.error("Ошибка при загрузке уведомлений:", error);
     }
@@ -62,8 +64,8 @@ function Layout({ children, onLogout }) {
   const markAsRead = async (id) => {
     try {
       await api.post(`notifications/${id}/mark_as_read/`);
-      // Локально обновляем статус, чтобы не делать лишний запрос
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      // Удаляем прочитанное уведомление из списка
+      setNotifications(prev => prev.filter(n => n.id !== id));
       setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (error) {
       console.error("Ошибка при отметке прочитанным:", error);
@@ -73,7 +75,8 @@ function Layout({ children, onLogout }) {
   const markAllAsRead = async () => {
     try {
       await api.post('notifications/mark_all_as_read/');
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      // Очищаем весь список
+      setNotifications([]);
       setUnreadCount(0);
     } catch (error) {
       console.error("Ошибка при отметке всех прочитанными:", error);
@@ -237,16 +240,16 @@ function Layout({ children, onLogout }) {
                       notifications.map(notif => (
                         <div
                           key={notif.id}
-                          onClick={() => !notif.is_read && markAsRead(notif.id)}
-                          className={`p-3 rounded-xl transition-all cursor-pointer ${notif.is_read ? 'bg-transparent hover:bg-gray-50' : 'bg-blue-50/50 hover:bg-blue-50 border border-blue-100'}`}
+                          onClick={() => markAsRead(notif.id)}
+                          className="p-3 rounded-xl transition-all cursor-pointer bg-blue-50/50 hover:bg-blue-50 border border-blue-100"
                         >
                           <div className="flex justify-between items-start mb-1">
-                            <h4 className={`text-sm ${notif.is_read ? 'font-semibold text-gray-700' : 'font-bold text-gray-900'}`}>
+                            <h4 className="text-sm font-bold text-gray-900">
                               {notif.title}
                             </h4>
-                            {!notif.is_read && <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0 ml-2"></span>}
+                            <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0 ml-2"></span>
                           </div>
-                          <p className={`text-xs ${notif.is_read ? 'text-gray-500' : 'text-gray-700 font-medium'} leading-relaxed`}>
+                          <p className="text-xs text-gray-700 font-medium leading-relaxed">
                             {notif.message}
                           </p>
                           <p className="text-[10px] text-gray-400 mt-2 font-medium">
