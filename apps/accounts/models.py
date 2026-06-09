@@ -1,17 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
-class Department(models.Model):
-    name = models.CharField(max_length=255, verbose_name="Название отдела", unique=True)
-    description = models.TextField(blank=True, verbose_name="Описание отдела")
-
-    class Meta:
-        verbose_name = "Отдел"
-        verbose_name_plural = "Отделы"
-
-    def __str__(self):
-        return self.name
-
 
 
 class User(AbstractUser):
@@ -45,13 +34,6 @@ class User(AbstractUser):
         blank=True,
         help_text='Specific permissions for this user.',
         related_name="custom_user_permissions"
-    )
-
-    departments = models.ManyToManyField(
-        Department,
-        blank=True,
-        related_name='users',
-        verbose_name="Отделы"
     )
 
     class Meta:
