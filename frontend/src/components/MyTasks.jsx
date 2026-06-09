@@ -241,7 +241,10 @@ function MyTasks() {
           {kanbanColumns.map(column => {
             const columnTasks = tasks.filter(task => {
               const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
-              return task.status === column.id && taskAssigneeId == currentUser?.id;
+              const isParticipant = (task.participants || []).includes(currentUser?.id);
+  // ТЕПЕРЬ ПРАВИЛЬНО: Задача попадает в колонку, если статус совпадает
+  // И текущий пользователь является либо Исполнителем, либо Участником
+              return task.status === column.id && (taskAssigneeId == currentUser?.id || isParticipant);
             });
             return (
               <div key={column.id} className={`flex flex-col flex-shrink-0 w-80 rounded-xl border ${column.color} max-h-full`}>

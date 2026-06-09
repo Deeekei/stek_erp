@@ -376,7 +376,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         # 1. Фильтр по проекту (для страницы проекта)
         project_id = self.request.query_params.get('project')
         if project_id:
-            queryset = queryset.filter(project_id=project_id)
+            queryset = queryset.filter(Q(assignee=user) | Q(participants=user)).distinct()
 
         # 2. ФИЛЬТР: Только мои задачи (где я ответственный)
         assigned_to_me = self.request.query_params.get('assigned_to_me')

@@ -605,6 +605,64 @@ function Dashboard() {
           </div>
         </div>
       )}
+      {isTaskModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); } }}>
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">Новая задача</h3>
+            <form onSubmit={handleCreateTask} className="space-y-4 sm:space-y-6">
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Название *</label>
+                  <input type="text" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 break-words" required />
+                </div>
+
+                {/* --- УМНЫЙ ВЫБОР ПРОЕКТА --- */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Проект *</label>
+                  <Select
+                    options={projects.filter(p => isFullAccess || p.owner === currentUser?.id || p.manager === currentUser?.id || (p.visibility === 'selected' && p.allowed_users?.includes(currentUser?.id))).map(p => ({ value: p.id, label: p.title }))}
+                    value={projectOptions.find(o => o.value == newTaskProject) || null}
+                    onChange={(opt) => setNewTaskProject(opt ? opt.value : null)}
+                    placeholder="Поиск проекта..."
+                    isSearchable
+                    menuPosition="fixed"
+                    styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
+                    noOptionsMessage={() => "Нет доступных проектов"}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label>
+                  <Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Поиск по ФИО..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Участники</label>
+                  <Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Поиск..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label>
+                  <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white">
+                    <option value="low">🟢 Низкая</option>
+                    <option value="medium">🔵 Средняя</option>
+                    <option value="high">🟣 Высокая</option>
+                    <option value="critical">🔴 Критичная</option>
+                  </select>
+                </div>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-4 border border-gray-100">
+                <div><label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План)</label><input type="date" value={newTaskPlanStart} onChange={(e) => setNewTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" /></div>
+                <div><label className="block text-xs font-bold text-gray-500 mb-1">Дедлайн *</label><input type="date" value={newTaskPlanEnd} onChange={(e) => setNewTaskPlanEnd(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" required /></div>
+              </div>
+              <div className="border border-dashed border-gray-300 p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors">
+                <label className="block text-sm font-bold text-gray-700 mb-2">📎 Прикрепить файлы</label><input type="file" multiple onChange={(e) => setNewTaskFiles(Array.from(e.target.files))} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer" />
+                {newTaskFiles.length > 0 && (<div className="mt-3 flex flex-wrap gap-2">{newTaskFiles.map((f, idx) => (<span key={idx} className="bg-white border border-gray-200 text-xs text-gray-600 px-2.5 py-1 rounded shadow-sm">📄 {f.name}</span>))}</div>)}
+              </div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Описание</label><textarea value={newTaskDescription} onChange={(e) => setNewTaskDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg min-h-[80px] break-words"></textarea></div>
+              <div className="flex justify-end gap-3 pt-6 border-t border-gray-50"><button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); }} className="px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition-colors">Создать задачу</button></div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
