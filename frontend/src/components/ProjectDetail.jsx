@@ -46,7 +46,7 @@ function ProjectDetail() {
   const [newTaskPlanStart, setNewTaskPlanStart] = useState('');
   const [newTaskPlanEnd, setNewTaskPlanEnd] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
-  const [newTaskParticipants, setNewTaskParticipants] = useState([]); // <-- НОВЫЙ СТЕЙТ
+  const [newTaskParticipants, setNewTaskParticipants] = useState([]);
   const [newTaskParent, setNewTaskParent] = useState('');
   const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]);
   const [newTaskFiles, setNewTaskFiles] = useState([]);
@@ -112,7 +112,20 @@ function ProjectDetail() {
       setLoadingTasks(true);
       const tasksRes = await api.get(`tasks/?project=${id}`);
       const tasksData = tasksRes.data.results || tasksRes.data;
-      setTasks(tasksData);
+
+      // Сортируем задачи хронологически (от ближайших дат к дальним)
+      const sortedTasks = [...tasksData].sort((a, b) => {
+        const dateA = a.plan_start_date || a.plan_end_date;
+        const dateB = b.plan_start_date || b.plan_end_date;
+
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+
+        return new Date(dateA) - new Date(dateB);
+      });
+
+      setTasks(sortedTasks);
       setLoadingTasks(false);
     } catch (error) {
       console.error("Ошибка загрузки задач:", error);
@@ -405,7 +418,6 @@ function ProjectDetail() {
     const isBoss = isFullAccess;
     const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
 
-    // Проверяем: является ли пользователь исполнителем ИЛИ участником
     const isWorker = taskAssigneeId == currentUser?.id;
     const isParticipant = (task.participants || []).includes(currentUser?.id);
 
@@ -449,7 +461,7 @@ function ProjectDetail() {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
       project: parseInt(id), plan_start_date: newTaskPlanStart, plan_end_date: newTaskPlanEnd,
       assignee: newTaskAssignee,
-      participants: newTaskParticipants, // ОТПРАВЛЯЕМ УЧАСТНИКОВ
+      participants: newTaskParticipants,
       parent_task: newTaskParent ? parseInt(newTaskParent) : null,
       linked_tasks: newTaskLinkedTasks
     };
@@ -488,7 +500,7 @@ function ProjectDetail() {
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
       plan_end_date: task.plan_end_date || '',
       assignee: assigneeId || null,
-      participants: task.participants || [], // ЧИТАЕМ УЧАСТНИКОВ
+      participants: task.participants || [],
       priority: task.priority || 'medium',
       linked_tasks: depsArray
     });
@@ -602,7 +614,7 @@ function ProjectDetail() {
 
       {loadingTasks ? (
         <div className="flex-1 flex items-center justify-center text-gray-400">
-           <svg className="animate-spin h-8 w-8 text-blue-600 mr-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+           <svg className="animate-spin h-8 w-8 text-blue-600 mr-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
            Загружаем задачи...
         </div>
       ) : (
