@@ -609,4 +609,4 @@ function Dashboard() {
   );
 }
 
-export default MyTasks;
+export default Dashboard;
