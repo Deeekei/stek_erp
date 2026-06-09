@@ -40,6 +40,7 @@ function Dashboard() {
   const [newTaskPlanStart, setNewTaskPlanStart] = useState('');
   const [newTaskPlanEnd, setNewTaskPlanEnd] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
+  const [newTaskParticipants, setNewTaskParticipants] = useState([]); // <-- СТЕЙТ УЧАСТНИКОВ
   const [newTaskProject, setNewTaskProject] = useState(null);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -184,7 +185,8 @@ function Dashboard() {
     if (!newTaskProject) return alert("Пожалуйста, выберите проект для задачи!");
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
-      project: parseInt(newTaskProject), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee
+      project: parseInt(newTaskProject), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee,
+      participants: newTaskParticipants // <-- ОТПРАВЛЯЕМ УЧАСТНИКОВ
     };
     if (newTaskPlanStart) payload.plan_start_date = newTaskPlanStart;
 
@@ -192,7 +194,8 @@ function Dashboard() {
       await api.post('tasks/', payload);
       fetchDashboardMetricsAndTasks(1);
       setIsTaskModalOpen(false);
-      setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd(''); setNewTaskAssignee(null); setNewTaskProject(null);
+      setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd('');
+      setNewTaskAssignee(null); setNewTaskParticipants([]); setNewTaskProject(null);
     } catch (error) { alert("Ошибка при создании задачи."); }
   };
 
@@ -201,7 +204,8 @@ function Dashboard() {
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
-      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium'
+      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium',
+      participants: task.participants || [] // <-- ЧИТАЕМ УЧАСТНИКОВ
     });
     setNewCommentText('');
     setIsEditModalOpen(true);
@@ -287,8 +291,10 @@ function Dashboard() {
     ? editingTask.assignee.id == currentUser?.id
     : editingTask?.assignee == currentUser?.id;
 
+  const isParticipant = (editingTask?.participants || []).includes(currentUser?.id);
+
   const hasAdminView = isFullAccess;
-  const canEdit = hasAdminView || isAssignee;
+  const canEdit = hasAdminView || isAssignee || isParticipant;
 
   const chartData = [
     { name: 'Новые', value: metrics.new_tasks, color: '#9CA3AF' },
@@ -299,7 +305,6 @@ function Dashboard() {
   if (loading) return <div className="p-4 sm:p-12 text-center text-gray-500 font-medium">Сборка дашборда...</div>;
 
   return (
-    // Обертка с серым фоном. -m-4 и -m-8 компенсируют отступы из Layout.jsx, чтобы фон был везде
     <div className="h-full flex flex-col">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-6 sm:mb-8 space-y-4 sm:space-y-0">
         <div>
@@ -368,7 +373,6 @@ function Dashboard() {
               {metrics.total > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    {/* Круг смещен левее, чтобы легенда влезла справа */}
                     <Pie data={chartData} cx="40%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={5} dataKey="value">
                       {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                     </Pie>
@@ -501,56 +505,28 @@ function Dashboard() {
 
       {/* --- МОДАЛКА ДЕТАЛЬНОГО ПРОСМОТРА НОВОСТИ --- */}
       {selectedNews && (
-        <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setSelectedNews(null); }}
-        >
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-4" onClick={(e) => { if (e.target === e.currentTarget) setSelectedNews(null); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden relative">
-            <button
-              onClick={() => setSelectedNews(null)}
-              className="absolute top-4 right-4 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full w-8 h-8 flex items-center justify-center font-bold transition-colors z-10"
-            >
-              ✕
-            </button>
+            <button onClick={() => setSelectedNews(null)} className="absolute top-4 right-4 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full w-8 h-8 flex items-center justify-center font-bold transition-colors z-10">✕</button>
 
             <div className="overflow-y-auto overflow-x-hidden p-5 sm:p-8 flex-1">
-              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full uppercase tracking-wider mb-4 inline-block">
-                Новость
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-800 mb-4 leading-tight break-words">
-                {selectedNews.title}
-              </h2>
-
+              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full uppercase tracking-wider mb-4 inline-block">Новость</span>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-800 mb-4 leading-tight break-words">{selectedNews.title}</h2>
               <div className="flex items-center text-xs text-gray-500 mb-6 font-medium space-x-4 border-b pb-4 flex-wrap gap-y-2">
                 <span>Автор: <span className="text-gray-800">{selectedNews.author_name}</span></span>
                 <span>Дата: <span className="text-gray-800">{new Date(selectedNews.created_at).toLocaleDateString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span></span>
               </div>
-
               {selectedNews.image && (
-                <div className="mb-6 rounded-xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50">
-                  <img src={selectedNews.image} alt={selectedNews.title} className="w-full max-h-[300px] sm:max-h-[400px] object-contain" />
-                </div>
+                <div className="mb-6 rounded-xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50"><img src={selectedNews.image} alt={selectedNews.title} className="w-full max-h-[300px] sm:max-h-[400px] object-contain" /></div>
               )}
-
-              <div className="text-gray-700 whitespace-pre-wrap break-words leading-relaxed text-sm sm:text-base">
-                {selectedNews.description || selectedNews.content}
-              </div>
+              <div className="text-gray-700 whitespace-pre-wrap break-words leading-relaxed text-sm sm:text-base">{selectedNews.description || selectedNews.content}</div>
             </div>
 
             <div className="bg-gray-50 p-4 border-t flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0">
               <div className="w-full sm:w-auto">
-                {canPostNews && (
-                  <button
-                    onClick={() => handleDeleteNews(selectedNews.id)}
-                    className="w-full sm:w-auto px-4 py-2 text-red-600 bg-red-50 border border-red-100 hover:bg-red-100 rounded-lg font-medium transition-colors text-sm"
-                  >
-                    🗑️ Удалить новость
-                  </button>
-                )}
+                {canPostNews && (<button onClick={() => handleDeleteNews(selectedNews.id)} className="w-full sm:w-auto px-4 py-2 text-red-600 bg-red-50 border border-red-100 hover:bg-red-100 rounded-lg font-medium transition-colors text-sm">🗑️ Удалить новость</button>)}
               </div>
-              <button onClick={() => setSelectedNews(null)} className="w-full sm:w-auto px-6 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 font-medium transition-colors">
-                Закрыть
-              </button>
+              <button onClick={() => setSelectedNews(null)} className="w-full sm:w-auto px-6 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 font-medium transition-colors">Закрыть</button>
             </div>
           </div>
         </div>
@@ -558,33 +534,16 @@ function Dashboard() {
 
       {/* --- МОДАЛКА ПУБЛИКАЦИИ НОВОСТИ --- */}
       {isNewsModalOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setIsNewsModalOpen(false); }}
-        >
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsNewsModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">Опубликовать новость</h3>
             <form onSubmit={handleCreateNews} className="space-y-4 sm:space-y-5">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Заголовок *</label>
-                  <input type="text" value={newNewsTitle} onChange={(e) => setNewNewsTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-gray-800 break-words" required />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Анонс (кратко для ленты) *</label>
-                  <textarea value={newNewsContent} onChange={(e) => setNewNewsContent(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-gray-800 min-h-[80px] break-words" required placeholder="Отображается на карточке в ленте"></textarea>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Подробный текст статьи</label>
-                  <textarea value={newNewsDescription} onChange={(e) => setNewNewsDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-gray-800 min-h-[120px] sm:min-h-[160px] break-words" placeholder="Отображается при открытии новости. Можно оставить пустым."></textarea>
-                </div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Заголовок *</label><input type="text" value={newNewsTitle} onChange={(e) => setNewNewsTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-gray-800 break-words" required /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Анонс (кратко для ленты) *</label><textarea value={newNewsContent} onChange={(e) => setNewNewsContent(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-gray-800 min-h-[80px] break-words" required placeholder="Отображается на карточке в ленте"></textarea></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Подробный текст статьи</label><textarea value={newNewsDescription} onChange={(e) => setNewNewsDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-gray-800 min-h-[120px] sm:min-h-[160px] break-words" placeholder="Отображается при открытии новости. Можно оставить пустым."></textarea></div>
                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 overflow-hidden">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Прикрепить картинку (опционально)</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setNewNewsImage(e.target.files[0])}
-                    className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-white file:text-blue-700 hover:file:bg-gray-100 cursor-pointer"
-                  />
+                  <input type="file" accept="image/*" onChange={(e) => setNewNewsImage(e.target.files[0])} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-white file:text-blue-700 hover:file:bg-gray-100 cursor-pointer" />
                   <p className="text-xs text-blue-600 mt-2 font-medium break-words">💡 Рекомендуемый формат: 16:9, файлы JPG/PNG, до 5 МБ.</p>
                 </div>
               <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-gray-50">
@@ -598,10 +557,7 @@ function Dashboard() {
 
       {/* --- ПОЛНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ КАК В ПРОЕКТАХ --- */}
       {isEditModalOpen && editingTask && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}
-        >
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-5xl max-h-[90vh] overflow-y-auto flex flex-col md:flex-row gap-6 md:gap-8 overflow-x-hidden relative">
             {hasAdminView ? (
               <>
@@ -616,11 +572,17 @@ function Dashboard() {
                         <label className="block text-sm text-gray-700 mb-1">Ответственный</label>
                         <Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                       </div>
+
+                      <div>
+                        <label className="block text-sm text-gray-700 mb-1">Участники</label>
+                        <Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
+                      </div>
+
                       <div>
                         <label className="block text-sm text-gray-700 mb-1">Статус</label>
                         <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
                       </div>
-                      <div className="sm:col-span-2">
+                      <div>
                         <label className="block text-sm text-gray-700 mb-1">Критичность</label>
                         <select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
                           <option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option>
@@ -675,13 +637,26 @@ function Dashboard() {
                 <div className="w-full md:w-80 border-t md:border-t-0 md:border-l pl-0 md:pl-6 flex flex-col bg-gray-50 -mx-5 sm:-mx-8 -mb-5 sm:-mb-8 md:-my-8 md:-mr-8 p-5 sm:p-8 pb-24 md:pb-8 overflow-y-auto">
                   <h4 className="text-lg font-bold text-gray-800 mb-6 flex-shrink-0">Детали задачи</h4>
                   <div className="space-y-6">
-                    <div className="bg-blue-100/60 text-blue-800 p-4 rounded-xl text-xs border border-blue-200 font-medium leading-relaxed"><span className="block mb-1 text-lg">👷‍♂️</span> Вы исполнитель. <br/>Следите за дедлайном.</div>
+                    <div className="bg-blue-100/60 text-blue-800 p-4 rounded-xl text-xs border border-blue-200 font-medium leading-relaxed">
+                      <span className="block mb-1 text-lg">{isAssignee ? '👷‍♂️' : '👀'}</span>
+                      {isAssignee ? 'Вы исполнитель. Следите за дедлайном.' : 'Вы участник задачи.'}
+                    </div>
                     <div className="space-y-4">
                       <div><span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Ответственный</span><p className="font-semibold text-gray-800 text-sm break-words">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</p></div>
+
+                      <div>
+                        <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Участники</span>
+                        <p className="font-semibold text-gray-800 text-sm break-words">
+                          {editingTask.participants?.length > 0
+                            ? editingTask.participants.map(pId => userOptions.find(o => o.value == pId)?.label || `Пользователь #${pId}`).join(', ')
+                            : 'Нет участников'}
+                        </p>
+                      </div>
+
                       <div><span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Сроки</span><div className="flex items-center text-sm font-semibold text-gray-800 flex-wrap">{editingTask.plan_start_date || '—'} <span className="text-gray-400 mx-2">→</span> <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500 font-bold' : ''}>{editingTask.plan_end_date || '—'}</span></div></div>
                       <div><span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Описание</span><div className="text-gray-700 text-xs whitespace-pre-wrap break-words bg-white p-3 rounded-lg border border-gray-200/60 shadow-sm min-h-[80px]">{editingTask.description || <span className="text-gray-400 italic">Описание отсутствует</span>}</div></div>
                     </div>
-                    {isAssignee && (
+                    {canEdit && (
                       <form id="editForm" onSubmit={handleUpdateTask} className="mt-8 pt-6 border-t border-gray-200">
                         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Обновить статус</label>
                         <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-sm font-medium text-gray-700">
@@ -704,10 +679,7 @@ function Dashboard() {
 
       {/* --- МОДАЛКА ПРИЧИНЫ ПРОСРОЧКИ --- */}
       {isCompletionModalOpen && taskToComplete && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}
-        >
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500 max-h-[90vh] overflow-y-auto overflow-x-hidden">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
             <form onSubmit={handleConfirmCompletion}>
@@ -723,10 +695,7 @@ function Dashboard() {
 
       {/* --- МОДАЛКА СОЗДАНИЯ ЗАДАЧИ --- */}
       {isTaskModalOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskProject(null); } }}
-        >
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); } }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">Новая задача</h3>
             <form onSubmit={handleCreateTask} className="space-y-4 sm:space-y-6">
@@ -743,7 +712,13 @@ function Dashboard() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label>
                   <Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выберите сотрудника..." isSearchable isClearable menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                 </div>
-                <div className="sm:col-span-2">
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Участники</label>
+                  <Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label>
                   <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white">
                     <option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option>
@@ -765,7 +740,7 @@ function Dashboard() {
                 <textarea value={newTaskDescription} onChange={(e) => setNewTaskDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none min-h-[80px] break-words"></textarea>
               </div>
               <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-gray-50">
-                <button type="button" onClick={() => setIsTaskModalOpen(false)} className="w-full sm:w-auto px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
+                <button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); }} className="w-full sm:w-auto px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
                 <button type="submit" className="w-full sm:w-auto px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-medium shadow-md transition-colors">Создать задачу</button>
               </div>
             </form>

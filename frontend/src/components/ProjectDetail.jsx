@@ -46,9 +46,10 @@ function ProjectDetail() {
   const [newTaskPlanStart, setNewTaskPlanStart] = useState('');
   const [newTaskPlanEnd, setNewTaskPlanEnd] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
+  const [newTaskParticipants, setNewTaskParticipants] = useState([]); // <-- НОВЫЙ СТЕЙТ
   const [newTaskParent, setNewTaskParent] = useState('');
   const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]);
-  const [newTaskFiles, setNewTaskFiles] = useState([]); // <-- НОВЫЙ СТЕЙТ ДЛЯ ФАЙЛОВ
+  const [newTaskFiles, setNewTaskFiles] = useState([]);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -403,9 +404,12 @@ function ProjectDetail() {
 
     const isBoss = isFullAccess;
     const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
-    const isWorker = taskAssigneeId == currentUser?.id;
 
-    if (!isBoss && !isWorker) return alert("Нет прав для смены статуса.");
+    // Проверяем: является ли пользователь исполнителем ИЛИ участником
+    const isWorker = taskAssigneeId == currentUser?.id;
+    const isParticipant = (task.participants || []).includes(currentUser?.id);
+
+    if (!isBoss && !isWorker && !isParticipant) return alert("Нет прав для смены статуса.");
 
     const isOverdue = task.plan_end_date && task.plan_end_date < today;
     if (newStatus === 'completed' && isOverdue) {
@@ -431,7 +435,6 @@ function ProjectDetail() {
     catch (error) { fetchTasks(); }
   };
 
-  // --- ОБНОВЛЕНО: Создание задачи вместе с загрузкой файлов ---
   const handleCreateTask = async (e) => {
     e.preventDefault();
 
@@ -444,38 +447,33 @@ function ProjectDetail() {
 
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
-      project: parseInt(id), plan_start_date: newTaskPlanStart, plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee,
+      project: parseInt(id), plan_start_date: newTaskPlanStart, plan_end_date: newTaskPlanEnd,
+      assignee: newTaskAssignee,
+      participants: newTaskParticipants, // ОТПРАВЛЯЕМ УЧАСТНИКОВ
       parent_task: newTaskParent ? parseInt(newTaskParent) : null,
       linked_tasks: newTaskLinkedTasks
     };
 
     try {
-      // 1. Создаем саму задачу
       const response = await api.post('tasks/', payload);
       let createdTask = response.data;
 
-      // 2. Если есть файлы, сразу отправляем их к новой задаче
       if (newTaskFiles.length > 0) {
         const uploadedAttachments = [];
         for (const file of newTaskFiles) {
           const formData = new FormData();
           formData.append('file', file);
-          const attRes = await api.post(`tasks/${createdTask.id}/upload_files/`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-          });
+          const attRes = await api.post(`tasks/${createdTask.id}/upload_files/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
           uploadedAttachments.push(attRes.data);
         }
-        // Прикрепляем файлы к объекту, чтобы они появились в интерфейсе
         createdTask.attachments = uploadedAttachments;
       }
 
-      // 3. Обновляем интерфейс
       setTasks(prevTasks => [...prevTasks, createdTask]);
       setIsTaskModalOpen(false);
 
-      // Сбрасываем форму
       setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd('');
-      setNewTaskAssignee(null); setNewTaskParent(''); setNewTaskLinkedTasks([]); setNewTaskFiles([]);
+      setNewTaskAssignee(null); setNewTaskParticipants([]); setNewTaskParent(''); setNewTaskLinkedTasks([]); setNewTaskFiles([]);
     } catch (error) {
       alert(`Ошибка: ${JSON.stringify(error.response?.data)}`);
     }
@@ -488,7 +486,10 @@ function ProjectDetail() {
 
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
-      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium',
+      plan_end_date: task.plan_end_date || '',
+      assignee: assigneeId || null,
+      participants: task.participants || [], // ЧИТАЕМ УЧАСТНИКОВ
+      priority: task.priority || 'medium',
       linked_tasks: depsArray
     });
     setNewCommentText(''); setIsEditModalOpen(true);
@@ -523,12 +524,7 @@ function ProjectDetail() {
     const numericId = Number(taskId);
     setTasks(prevTasks => prevTasks.filter(t => t.id !== numericId));
     setIsEditModalOpen(false);
-    try {
-      await api.delete(`tasks/${numericId}/`);
-    } catch (error) {
-      alert("Не удалось удалить задачу на сервере.");
-      fetchTasks();
-    }
+    try { await api.delete(`tasks/${numericId}/`); } catch (error) { alert("Ошибка при удалении."); fetchTasks(); }
   };
 
   const handleAddComment = async (e) => {
@@ -566,8 +562,10 @@ function ProjectDetail() {
     ? editingTask.assignee.id == currentUser?.id
     : editingTask?.assignee == currentUser?.id;
 
+  const isParticipant = (editingTask?.participants || []).includes(currentUser?.id);
+
   const hasAdminView = isFullAccess;
-  const canEdit = hasAdminView || isAssignee;
+  const canEdit = hasAdminView || isAssignee || isParticipant;
 
   const kanbanColumns = [
     { id: 'new', title: 'Новые', color: 'border-gray-200 bg-gray-50' },
@@ -590,14 +588,7 @@ function ProjectDetail() {
           {isFullAccess && (
             <>
               <button onClick={() => fileInputRef.current.click()} className="flex-1 sm:flex-none px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap">📥 Импорт</button>
-
-              <button
-                onClick={() => { setEditProjectTitle(project.title); setIsProjectEditModalOpen(true); }}
-                className="flex-1 sm:flex-none px-4 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap"
-              >
-                ✏️ Изменить
-              </button>
-
+              <button onClick={() => { setEditProjectTitle(project.title); setIsProjectEditModalOpen(true); }} className="flex-1 sm:flex-none px-4 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap">✏️ Изменить</button>
               <button onClick={handleDeleteProject} className="flex-1 sm:flex-none px-4 py-2 border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-lg text-sm transition-colors shadow-sm whitespace-nowrap">🗑️ Удалить</button>
             </>
           )}
@@ -672,23 +663,9 @@ function ProjectDetail() {
                 <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded whitespace-nowrap ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
               </div>
 
-              <div
-                className="flex-1 overflow-auto relative select-none"
-                ref={ganttContainerRef}
-                onPointerDownCapture={handleGanttPointerDown}
-                onWheelCapture={handleGanttWheel}
-              >
+              <div className="flex-1 overflow-auto relative select-none" ref={ganttContainerRef} onPointerDownCapture={handleGanttPointerDown} onWheelCapture={handleGanttWheel}>
                 {ganttTasks.length > 0 ? (
-                  <Gantt
-                    tasks={ganttTasks}
-                    viewMode={ganttZoom}
-                    onDateChange={handleGanttDateChange}
-                    onExpanderClick={handleExpanderClick}
-                    TaskListHeader={CustomTaskListHeader}
-                    TaskListTable={CustomTaskListTable}
-                    listCellWidth={isMobile ? 180 : 380}
-                    locale="ru"
-                  />
+                  <Gantt tasks={ganttTasks} viewMode={ganttZoom} onDateChange={handleGanttDateChange} onExpanderClick={handleExpanderClick} TaskListHeader={CustomTaskListHeader} TaskListTable={CustomTaskListTable} listCellWidth={isMobile ? 180 : 380} locale="ru" />
                 ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
               </div>
             </div>
@@ -704,13 +681,7 @@ function ProjectDetail() {
             <form onSubmit={handleUpdateProject}>
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Название проекта</label>
-                <input
-                  type="text"
-                  value={editProjectTitle}
-                  onChange={(e) => setEditProjectTitle(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
+                <input type="text" value={editProjectTitle} onChange={(e) => setEditProjectTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required />
               </div>
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setIsProjectEditModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
@@ -723,10 +694,7 @@ function ProjectDetail() {
 
       {/* --- ПОЛНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ --- */}
       {isEditModalOpen && editingTask && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}
-        >
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-5xl max-h-[90vh] overflow-y-auto flex flex-col md:flex-row gap-6 md:gap-8 overflow-x-hidden relative">
             {hasAdminView ? (
               <>
@@ -742,29 +710,22 @@ function ProjectDetail() {
                         <Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                       </div>
                       <div>
-                        <label className="block text-sm text-gray-700 mb-1">Статус</label>
-                        <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
+                        <label className="block text-sm text-gray-700 mb-1">Участники</label>
+                        <Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                       </div>
 
                       <div className="sm:col-span-2">
                         <label className="block text-sm text-gray-700 mb-1">Связанные задачи (зависят от текущей)</label>
-                        <Select
-                          isMulti
-                          options={taskSelectOptions.filter(opt => opt.value !== editingTask.id)}
-                          value={taskSelectOptions.filter(opt => (editFormData.linked_tasks || []).includes(opt.value))}
-                          onChange={(selected) => setEditFormData({...editFormData, linked_tasks: selected ? selected.map(s => s.value) : []})}
-                          placeholder="Добавить связь..."
-                          menuPosition="fixed"
-                          menuPortalTarget={document.body}
-                          styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
-                        />
+                        <Select isMulti options={taskSelectOptions.filter(opt => opt.value !== editingTask.id)} value={taskSelectOptions.filter(opt => (editFormData.linked_tasks || []).includes(opt.value))} onChange={(selected) => setEditFormData({...editFormData, linked_tasks: selected ? selected.map(s => s.value) : []})} placeholder="Добавить связь..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                       </div>
 
-                      <div className="sm:col-span-2">
+                      <div>
+                        <label className="block text-sm text-gray-700 mb-1">Статус</label>
+                        <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
+                      </div>
+                      <div>
                         <label className="block text-sm text-gray-700 mb-1">Критичность</label>
-                        <select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
-                          <option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option>
-                        </select>
+                        <select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select>
                       </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -815,13 +776,26 @@ function ProjectDetail() {
                 <div className="w-full md:w-80 border-t md:border-t-0 md:border-l pl-0 md:pl-6 flex flex-col bg-gray-50 -mx-5 sm:-mx-8 -mb-5 sm:-mb-8 md:-my-8 md:-mr-8 p-5 sm:p-8 pb-24 md:pb-8 overflow-y-auto">
                   <h4 className="text-lg font-bold text-gray-800 mb-6 flex-shrink-0">Детали задачи</h4>
                   <div className="space-y-6">
-                    <div className="bg-blue-100/60 text-blue-800 p-4 rounded-xl text-xs border border-blue-200 font-medium leading-relaxed"><span className="block mb-1 text-lg">👷‍♂️</span> Вы исполнитель. <br/>Следите за дедлайном.</div>
+                    <div className="bg-blue-100/60 text-blue-800 p-4 rounded-xl text-xs border border-blue-200 font-medium leading-relaxed">
+                      <span className="block mb-1 text-lg">{isAssignee ? '👷‍♂️' : '👀'}</span>
+                      {isAssignee ? 'Вы исполнитель. Следите за дедлайном.' : 'Вы участник задачи.'}
+                    </div>
                     <div className="space-y-4">
                       <div><span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Ответственный</span><p className="font-semibold text-gray-800 text-sm break-words">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</p></div>
+
+                      <div>
+                        <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Участники</span>
+                        <p className="font-semibold text-gray-800 text-sm break-words">
+                          {editingTask.participants?.length > 0
+                            ? editingTask.participants.map(pId => userOptions.find(o => o.value == pId)?.label || `Пользователь #${pId}`).join(', ')
+                            : 'Нет участников'}
+                        </p>
+                      </div>
+
                       <div><span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Сроки</span><div className="flex items-center text-sm font-semibold text-gray-800 flex-wrap">{editingTask.plan_start_date || '—'} <span className="text-gray-400 mx-2">→</span> <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500 font-bold' : ''}>{editingTask.plan_end_date || '—'}</span></div></div>
                       <div><span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Описание</span><div className="text-gray-700 text-xs whitespace-pre-wrap break-words bg-white p-3 rounded-lg border border-gray-200/60 shadow-sm min-h-[80px]">{editingTask.description || <span className="text-gray-400 italic">Описание отсутствует</span>}</div></div>
                     </div>
-                    {isAssignee && (
+                    {canEdit && (
                       <form id="editForm" onSubmit={handleUpdateTask} className="mt-8 pt-6 border-t border-gray-200">
                         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Обновить статус</label>
                         <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-white text-sm font-medium text-gray-700">
@@ -844,10 +818,7 @@ function ProjectDetail() {
 
       {/* --- МОДАЛКА ПРИЧИНЫ ПРОСРОЧКИ --- */}
       {isCompletionModalOpen && taskToComplete && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}
-        >
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500 max-h-[90vh] overflow-y-auto overflow-x-hidden">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
             <form onSubmit={handleConfirmCompletion}>
@@ -863,10 +834,7 @@ function ProjectDetail() {
 
       {/* --- МОДАЛКА СОЗДАНИЯ ЗАДАЧИ --- */}
       {isTaskModalOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); } }}
-        >
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); setNewTaskParticipants([]); } }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">{newTaskParent ? 'Новая подзадача' : 'Новая задача'}</h3>
             <form onSubmit={handleCreateTask} className="space-y-4 sm:space-y-6">
@@ -879,22 +847,17 @@ function ProjectDetail() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label>
                   <Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Участники</label>
+                  <Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
+                </div>
 
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Связанные задачи (зависят от текущей)</label>
-                  <Select
-                    isMulti
-                    options={taskSelectOptions}
-                    value={taskSelectOptions.filter(o => newTaskLinkedTasks.includes(o.value))}
-                    onChange={(selected) => setNewTaskLinkedTasks(selected ? selected.map(s => s.value) : [])}
-                    placeholder="Выберите задачи..."
-                    menuPosition="fixed"
-                    menuPortalTarget={document.body}
-                    styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
-                  />
+                  <Select isMulti options={taskSelectOptions} value={taskSelectOptions.filter(o => newTaskLinkedTasks.includes(o.value))} onChange={(selected) => setNewTaskLinkedTasks(selected ? selected.map(s => s.value) : [])} placeholder="Выберите задачи..." menuPosition="fixed" menuPortalTarget={document.body} styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                 </div>
 
-                <div>
+                <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label>
                   <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white">
                     <option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option>
@@ -912,21 +875,13 @@ function ProjectDetail() {
                 </div>
               </div>
 
-              {/* ПОЛЕ ПРИКРЕПЛЕНИЯ ФАЙЛОВ */}
               <div className="border border-dashed border-gray-300 p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors">
                 <label className="block text-sm font-bold text-gray-700 mb-2">📎 Прикрепить файлы</label>
-                <input
-                  type="file"
-                  multiple
-                  onChange={(e) => setNewTaskFiles(Array.from(e.target.files))}
-                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
-                />
+                <input type="file" multiple onChange={(e) => setNewTaskFiles(Array.from(e.target.files))} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer" />
                 {newTaskFiles.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {newTaskFiles.map((f, idx) => (
-                      <span key={idx} className="bg-white border border-gray-200 text-xs text-gray-600 px-2.5 py-1 rounded shadow-sm flex items-center">
-                        📄 {f.name}
-                      </span>
+                      <span key={idx} className="bg-white border border-gray-200 text-xs text-gray-600 px-2.5 py-1 rounded shadow-sm flex items-center">📄 {f.name}</span>
                     ))}
                   </div>
                 )}
@@ -937,7 +892,7 @@ function ProjectDetail() {
                 <textarea value={newTaskDescription} onChange={(e) => setNewTaskDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none min-h-[80px] break-words"></textarea>
               </div>
               <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-gray-50">
-                <button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); }} className="w-full sm:w-auto px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
+                <button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); setNewTaskParticipants([]); }} className="w-full sm:w-auto px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button>
                 <button type="submit" className="w-full sm:w-auto px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-medium shadow-md transition-colors">Создать</button>
               </div>
             </form>
