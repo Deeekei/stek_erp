@@ -92,20 +92,29 @@ class CanEditTaskPermission(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
 
-        # 2. ИСКЛЮЧЕНИЕ: Участники могут оставлять комментарии И скрывать задачу со своей доски
+        # 2. ИСКЛЮЧЕНИЕ: Добавление комментария и скрытие разрешено всем авторизованным
         if view.action in ['add_comment', 'hide']:
             return True
 
         # === НИЖЕ ИДУТ ПРАВИЛА ДЛЯ РЕДАКТИРОВАНИЯ САМОЙ ЗАДАЧИ ===
+
+        # 3. Админы и директора могут редактировать всё
         if getattr(request.user, 'role', '') in ['admin', 'director'] or request.user.is_superuser:
             return True
 
+        # 4. Менеджер проекта может редактировать задачи своего проекта
         if obj.project and obj.project.manager == request.user:
             return True
 
+        # 🌟 ИСПРАВЛЕНИЕ: Если проект ограниченный, и юзер входит в круг лиц — ему МОЖНО редактировать параметры/сроки
+        if obj.project and obj.project.visibility == 'selected' and obj.project.allowed_users.filter(id=request.user.id).exists():
+            return True
+
+        # 5. ИСПОЛНИТЕЛЬ задачи может её редактировать (например, менять статус)
         if obj.assignee == request.user:
             return True
 
+        # Всем остальным редактировать задачу запрещено
         return False
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -353,7 +362,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     # Пермишены оставляем твои, но главная "магия" защиты будет в методе update
-    permission_classes = [IsAuthenticated, IsManagerOrAdmin, CanEditTaskPermission]
+    permission_classes = [IsAuthenticated, CanEditTaskPermission]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['project']
 
