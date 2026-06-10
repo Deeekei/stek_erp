@@ -28,6 +28,7 @@ from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta, date
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import PermissionDenied
+from apps.projects.utils import notify_user
 
 
 User = get_user_model()
@@ -47,11 +48,13 @@ def notify_user(user, title, message):
         message=message
     )
 
-    # 2. Отправляем письмо через Celery (упадет в консоль, так как у нас console backend)
-    try:
-        send_notification_email.delay(user.email, title, message)
-    except Exception as e:
-        print(f"Ошибка отправки Email через Celery: {e}")
+    # 2. Отправляем письмо через Celery (теперь через реальный SMTP)
+    # Обязательно проверяем, что поле email заполнено
+    if getattr(user, 'email', None):
+        try:
+            send_notification_email.delay(user.email, title, message)
+        except Exception as e:
+            print(f"Ошибка отправки Email через Celery: {e}")
 
 class DashboardOverduePagination(PageNumberPagination):
     page_size = 10  # Ровно 10 задач на страницу

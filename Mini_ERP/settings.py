@@ -137,7 +137,16 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_HOST = 'smtp.yandex.ru'
+EMAIL_PORT = 465
+EMAIL_USE_SSL = True
+EMAIL_USE_TLS = False
+
+EMAIL_HOST_USER = 'stroitekufa@yandex.com'
+EMAIL_HOST_PASSWORD = 'ghitglzwheiovpnq'
+
+
+DEFAULT_FROM_EMAIL = f'ERP <{EMAIL_HOST_USER}>'
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
