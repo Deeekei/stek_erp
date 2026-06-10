@@ -404,12 +404,40 @@ class TaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def hide(self, request, pk=None):
         """
-        Эндпоинт для скрытия задачи.
-        Вызывается фронтендом, когда УЧАСТНИК (не исполнитель) перетаскивает карточку в канбане.
+        Скрытие задачи с доски Участника и автоматический лог в комментарии.
         """
         task = self.get_object()
-        task.hidden_for.add(request.user)
-        return Response({'detail': 'Задача успешно скрыта с вашей доски'}, status=status.HTTP_200_OK)
+        user = request.user
+
+        # 1. Скрываем задачу
+        task.hidden_for.add(user)
+
+        # 2. Формируем автоматический комментарий
+        target_status = request.data.get('status')
+        if target_status:
+            full_name = user.get_full_name() or user.username
+            text = ""
+
+            if target_status == 'in_progress':
+                text = f"⚙️ {full_name} принял(а) задачу в работу"
+            elif target_status == 'completed':
+                text = f"✅ {full_name} завершил(а) свою часть работы"
+
+            if text:
+                # Создаем комментарий от лица пользователя
+                serializer = CommentSerializer(data={'text': text})
+                if serializer.is_valid():
+                    serializer.save(task=task, author=user)
+
+                    # Отправляем уведомление ответственному за задачу
+                    if task.assignee and task.assignee != user:
+                        notify_user(
+                            user=task.assignee,
+                            title="Обновление от участника",
+                            message=f"{full_name} передвинул задачу '{task.title}'.\n{text}"
+                        )
+
+        return Response({'detail': 'Задача скрыта, лог сохранен'}, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
         """

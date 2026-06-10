@@ -51,6 +51,14 @@ function Dashboard() {
 
   const today = new Date().toISOString().split('T')[0];
 
+  const checkIsParticipant = (participantsArray, userId) => {
+    if (!participantsArray || !Array.isArray(participantsArray)) return false;
+    return participantsArray.some(p => {
+      const pId = typeof p === 'object' ? p.id : p;
+      return pId == userId;
+    });
+  };
+
   useEffect(() => {
     const initFast = async () => {
       setLoading(true);
@@ -178,7 +186,8 @@ function Dashboard() {
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
-      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium', participants: task.participants || []
+      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium', participants: task.participants || [],
+      project: task.project || null
     });
     setNewCommentText('');
     setIsEditModalOpen(true);
@@ -192,8 +201,23 @@ function Dashboard() {
     }
     const payload = { ...editFormData };
     if (!payload.plan_start_date) payload.plan_start_date = null;
+
     try {
-      await api.patch(`tasks/${editingTask.id}/`, payload);
+      const response = await api.patch(`tasks/${editingTask.id}/`, payload);
+      let updatedTask = response.data;
+
+      if (editingTask.status !== editFormData.status) {
+         const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
+         let autoText = '';
+         if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
+         if (editFormData.status === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
+         if (editFormData.status === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
+         if (autoText) {
+             const commentRes = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: autoText });
+             updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
+         }
+      }
+
       fetchDashboardMetricsAndTasks(currentOverduePage);
       setIsEditModalOpen(false); setEditingTask(null);
     } catch (error) { alert("Ошибка сохранения."); }
@@ -204,8 +228,14 @@ function Dashboard() {
     if (!completionDelayReason.trim()) return alert("Необходимо указать причину просрочки!");
     const payload = { status: 'completed', delay_reason: completionDelayReason, actual_end_date: today };
     setIsCompletionModalOpen(false);
+
     try {
-      await api.patch(`tasks/${taskToComplete.id}/`, payload);
+      const response = await api.patch(`tasks/${taskToComplete.id}/`, payload);
+      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
+      await api.post(`tasks/${taskToComplete.id}/add_comment/`, {
+          text: `✅ ${fullName} завершил(а) задачу с просрочкой.\nПричина: ${completionDelayReason}`
+      });
+
       setTaskToComplete(null); setCompletionDelayReason('');
       fetchDashboardMetricsAndTasks(currentOverduePage);
     } catch (error) { alert("Ошибка при сохранении."); }
@@ -218,7 +248,7 @@ function Dashboard() {
   };
 
   const handleAddComment = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!newCommentText.trim()) return;
     try {
       const response = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: newCommentText });
@@ -250,7 +280,7 @@ function Dashboard() {
   const taskProject = editingTask ? projects.find(p => p.id === editingTask.project) : null;
   const isBossAll = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id));
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
-  const isParticipantTask = (editingTask?.participants || []).includes(currentUser?.id);
+  const isParticipantTask = checkIsParticipant(editingTask?.participants, currentUser?.id);
 
   const canEditAll = isBossAll;
   const canInteract = isBossAll || isWorkerTask || isParticipantTask;
@@ -395,15 +425,12 @@ function Dashboard() {
         </div>
       )}
 
-      {/* === ЕДИНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ (FLEX-СТРУКТУРА) === */}
+      {/* === ЕДИНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] h-[90vh] flex flex-col overflow-hidden">
-
             <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
-
               {canEditAll ? (
-                // --- ВЬЮШКА ДЛЯ БОССА ---
                 <>
                   <div className="w-full md:w-2/3 flex flex-col bg-white border-r border-gray-200 min-h-0">
                     <div className="flex-1 overflow-y-auto p-6 md:p-8">
@@ -418,6 +445,10 @@ function Dashboard() {
                       <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
                         <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="sm:col-span-2">
+                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Проект</label>
+                            <Select options={projectOptions} value={projectOptions.find(o => o.value == editFormData.project) || null} onChange={(opt) => setEditFormData({...editFormData, project: opt ? opt.value : null})} placeholder="Выбрать проект..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
+                          </div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                           <div>
@@ -440,9 +471,9 @@ function Dashboard() {
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📎 Прикрепленные файлы</h4>
                         <div className="flex flex-wrap gap-2 mb-3">
                           {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
-                            <div key={att.id} className="relative text-xs bg-white border border-gray-200 px-3 py-2 rounded-lg flex flex-col shadow-sm min-w-[120px] max-w-xs group hover:border-blue-300 transition-colors">
-                              {canInteract && <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10" title="Удалить">✕</button>}
-                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 mb-1 hover:text-blue-600 truncate break-words"><span className="mr-2 text-base">📄</span> <span className="truncate">{att.file ? att.file.split('/').pop() : `Файл ${att.id}`}</span></a>
+                            <div key={att.id} className="relative text-xs bg-white border border-gray-200 px-3 py-2 rounded-lg flex flex-col shadow-sm group hover:border-blue-300 transition-colors">
+                              {canInteract && <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>}
+                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words"><span className="mr-2 text-base">📄</span> <span className="truncate">{att.file ? att.file.split('/').pop() : `Файл`}</span></a>
                             </div>
                           )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
                         </div>
@@ -450,16 +481,15 @@ function Dashboard() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Правая колонка (Чат) */}
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 min-h-0">
-                    <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200">
-                       <h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4>
-                    </div>
+                    <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200"><h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4></div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name.includes(currentUser.first_name);
+                          const isMe = currentUser && c.author_name && (
+                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                            (currentUser.username && c.author_name.includes(currentUser.username))
+                          );
                           return (
                             <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                               <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
@@ -484,7 +514,6 @@ function Dashboard() {
                   </div>
                 </>
               ) : (
-                // --- ВЬЮШКА ДЛЯ ИСПОЛНИТЕЛЯ / УЧАСТНИКА ---
                 <>
                   <div className="w-full md:w-2/3 flex flex-col bg-slate-50 border-r border-gray-200 min-h-0 order-2 md:order-1">
                     <div className="p-6 md:px-8 pb-4 flex-shrink-0 border-b border-gray-200 bg-white">
@@ -500,7 +529,10 @@ function Dashboard() {
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name.includes(currentUser.first_name);
+                          const isMe = currentUser && c.author_name && (
+                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                            (currentUser.username && c.author_name.includes(currentUser.username))
+                          );
                           return (
                             <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                               <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
@@ -583,7 +615,6 @@ function Dashboard() {
               )}
             </div>
 
-            {/* Футер */}
             <div className="bg-gray-50 border-t border-gray-200 p-4 flex flex-col sm:flex-row justify-end gap-3 flex-shrink-0">
              <button onClick={() => setIsEditModalOpen(false)} className="w-full sm:w-auto px-6 py-2 bg-white text-gray-700 rounded-lg font-bold hover:bg-gray-100 transition-colors border border-gray-300">Закрыть</button>
              {canEditAll && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить изменения</button>}
@@ -594,17 +625,7 @@ function Dashboard() {
         </div>
       )}
 
-      {isCompletionModalOpen && taskToComplete && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
-          <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
-            <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
-            <form onSubmit={handleConfirmCompletion}>
-              <textarea value={completionDelayReason} onChange={(e) => setCompletionDelayReason(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words" placeholder="Укажите причину..." required />
-              <div className="flex justify-end gap-3"><button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button></div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* --- МОДАЛКА СОЗДАНИЯ ЗАДАЧИ --- */}
       {isTaskModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); } }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -659,6 +680,18 @@ function Dashboard() {
               </div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Описание</label><textarea value={newTaskDescription} onChange={(e) => setNewTaskDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg min-h-[80px] break-words"></textarea></div>
               <div className="flex justify-end gap-3 pt-6 border-t border-gray-50"><button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); }} className="px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition-colors">Создать задачу</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isCompletionModalOpen && taskToComplete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
+          <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
+            <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
+            <form onSubmit={handleConfirmCompletion}>
+              <textarea value={completionDelayReason} onChange={(e) => setCompletionDelayReason(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words" placeholder="Укажите причину..." required />
+              <div className="flex justify-end gap-3"><button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button></div>
             </form>
           </div>
         </div>

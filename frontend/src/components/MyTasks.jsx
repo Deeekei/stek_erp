@@ -24,6 +24,14 @@ function MyTasks() {
 
   const today = new Date().toISOString().split('T')[0];
 
+  const checkIsParticipant = (participantsArray, userId) => {
+    if (!participantsArray || !Array.isArray(participantsArray)) return false;
+    return participantsArray.some(p => {
+      const pId = typeof p === 'object' ? p.id : p;
+      return pId == userId;
+    });
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -95,33 +103,17 @@ function MyTasks() {
 
     if (!isBoss && !isWorker && !isParticipant) return alert("Нет прав для действия.");
 
-    // --- ЛОГИКА ДЛЯ УЧАСТНИКОВ ---
     if (isParticipant && !isWorker && !isBoss) {
-      // 1. Убираем задачу с доски локально
       setTasks(prev => prev.filter(t => t.id !== taskId));
-
       try {
-        // 2. Отправляем на бэкенд запрос на скрытие
-        await api.post(`tasks/${taskId}/hide/`);
-
-        // 3. Формируем и отправляем комментарий о действии участника
-        const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-        let autoText = '';
-        if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
-        if (newStatus === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
-
-        if (autoText) {
-           await api.post(`tasks/${taskId}/add_comment/`, { text: autoText });
-        }
+        await api.post(`tasks/${taskId}/hide/`, { status: newStatus });
       } catch (error) {
-        console.error("Ошибка при скрытии/комментировании:", error);
-        // Если что-то пошло не так на сервере — возвращаем доску в исходное состояние
+        alert("Ошибка сети. Не удалось скрыть задачу.");
         fetchData();
       }
-      return; // Завершаем выполнение, статус менять не нужно!
+      return;
     }
 
-    // --- ЛОГИКА ДЛЯ ИСПОЛНИТЕЛЯ И МЕНЕДЖЕРА (СМЕНА СТАТУСА) ---
     const isOverdue = task.plan_end_date && task.plan_end_date < today;
     if (newStatus === 'completed' && isOverdue) {
       setTaskToComplete(task);
@@ -157,7 +149,7 @@ function MyTasks() {
       const response = await api.patch(`tasks/${taskToComplete.id}/`, payload);
       let updatedTask = response.data;
 
-      const fullName = `${currentUser.last_name || ''} ${currentUser.first_name || ''}`.trim() || currentUser.username;
+      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
       const commentRes = await api.post(`tasks/${taskToComplete.id}/add_comment/`, {
           text: `✅ ${fullName} завершил(а) задачу с просрочкой.\nПричина: ${completionDelayReason}`
       });
@@ -208,7 +200,7 @@ function MyTasks() {
       let updatedTask = response.data;
 
       if (editingTask.status !== editFormData.status) {
-         const fullName = `${currentUser.last_name || ''} ${currentUser.first_name || ''}`.trim() || currentUser.username;
+         const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
          let autoText = '';
          if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
          if (editFormData.status === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
@@ -231,13 +223,16 @@ function MyTasks() {
   };
 
   const handleAddComment = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!newCommentText.trim()) return;
     try {
       const response = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: newCommentText });
       const updatedTask = { ...editingTask, comments: [...(editingTask.comments || []), response.data] };
       setEditingTask(updatedTask); setTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t)); setNewCommentText('');
-    } catch (error) { alert("Не удалось отправить."); }
+    } catch (error) {
+      console.error(error);
+      alert("Не удалось отправить комментарий.");
+    }
   };
 
   const handleFileUpload = async (e) => {
@@ -264,7 +259,7 @@ function MyTasks() {
   const taskProject = editingTask ? projects.find(p => p.id === editingTask.project) : null;
   const isBossAll = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id));
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
-  const isParticipantTask = (editingTask?.participants || []).includes(currentUser?.id);
+  const isParticipantTask = checkIsParticipant(editingTask?.participants, currentUser?.id);
 
   const canEditAll = isBossAll;
   const canInteract = isBossAll || isWorkerTask || isParticipantTask;
@@ -298,7 +293,7 @@ function MyTasks() {
           {kanbanColumns.map(column => {
             const columnTasks = tasks.filter(task => {
               const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
-              const isParticipant = (task.participants || []).includes(currentUser?.id);
+              const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
               return task.status === column.id && (taskAssigneeId == currentUser?.id || isParticipant);
             });
             return (
@@ -403,7 +398,10 @@ function MyTasks() {
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name.includes(currentUser.first_name);
+                          const isMe = currentUser && c.author_name && (
+                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                            (currentUser.username && c.author_name.includes(currentUser.username))
+                          );
                           return (
                             <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                               <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
@@ -443,7 +441,10 @@ function MyTasks() {
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name.includes(currentUser.first_name);
+                          const isMe = currentUser && c.author_name && (
+                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                            (currentUser.username && c.author_name.includes(currentUser.username))
+                          );
                           return (
                             <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                               <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
