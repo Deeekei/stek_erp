@@ -91,17 +91,37 @@ function MyTasks() {
 
     const isBoss = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id));
     const isWorker = task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id;
-    const isParticipant = (task.participants || []).includes(currentUser?.id);
+    const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
 
     if (!isBoss && !isWorker && !isParticipant) return alert("Нет прав для действия.");
 
+    // --- ЛОГИКА ДЛЯ УЧАСТНИКОВ ---
     if (isParticipant && !isWorker && !isBoss) {
+      // 1. Убираем задачу с доски локально
       setTasks(prev => prev.filter(t => t.id !== taskId));
-      try { await api.post(`tasks/${taskId}/hide/`); }
-      catch (error) { fetchData(); }
-      return;
+
+      try {
+        // 2. Отправляем на бэкенд запрос на скрытие
+        await api.post(`tasks/${taskId}/hide/`);
+
+        // 3. Формируем и отправляем комментарий о действии участника
+        const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
+        let autoText = '';
+        if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
+        if (newStatus === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
+
+        if (autoText) {
+           await api.post(`tasks/${taskId}/add_comment/`, { text: autoText });
+        }
+      } catch (error) {
+        console.error("Ошибка при скрытии/комментировании:", error);
+        // Если что-то пошло не так на сервере — возвращаем доску в исходное состояние
+        fetchData();
+      }
+      return; // Завершаем выполнение, статус менять не нужно!
     }
 
+    // --- ЛОГИКА ДЛЯ ИСПОЛНИТЕЛЯ И МЕНЕДЖЕРА (СМЕНА СТАТУСА) ---
     const isOverdue = task.plan_end_date && task.plan_end_date < today;
     if (newStatus === 'completed' && isOverdue) {
       setTaskToComplete(task);
@@ -115,7 +135,7 @@ function MyTasks() {
     try {
       await api.patch(`tasks/${taskId}/`, { status: newStatus });
 
-      const fullName = `${currentUser.last_name || ''} ${currentUser.first_name || ''}`.trim() || currentUser.username;
+      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
       let autoText = '';
       if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
       if (newStatus === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
