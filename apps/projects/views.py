@@ -92,25 +92,20 @@ class CanEditTaskPermission(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
 
-        # 2. ИСКЛЮЧЕНИЕ: Добавление комментария разрешено ВСЕМ авторизованным
-        if view.action == 'add_comment':
+        # 2. ИСКЛЮЧЕНИЕ: Участники могут оставлять комментарии И скрывать задачу со своей доски
+        if view.action in ['add_comment', 'hide']:
             return True
 
         # === НИЖЕ ИДУТ ПРАВИЛА ДЛЯ РЕДАКТИРОВАНИЯ САМОЙ ЗАДАЧИ ===
-
-        # 3. Админы и директора могут редактировать всё
         if getattr(request.user, 'role', '') in ['admin', 'director'] or request.user.is_superuser:
             return True
 
-        # 4. Менеджер проекта может редактировать задачи своего проекта
         if obj.project and obj.project.manager == request.user:
             return True
 
-        # 5. ИСПОЛНИТЕЛЬ задачи может её редактировать (например, менять статус)
         if obj.assignee == request.user:
             return True
 
-        # Всем остальным редактировать задачу запрещено
         return False
 
 class ProjectViewSet(viewsets.ModelViewSet):
