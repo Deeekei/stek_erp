@@ -160,6 +160,28 @@ function ProjectDetail() {
     } finally { e.target.value = ''; }
   };
 
+  // НОВАЯ ФУНКЦИЯ ДЛЯ ВЫГРУЗКИ EXCEL
+  const handleExportExcel = async () => {
+    try {
+      const response = await api.get(`projects/${id}/export_excel/`, {
+        responseType: 'blob', // Важно для бинарных файлов
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Проект_${project.title || id}_Задачи.xlsx`);
+
+      document.body.appendChild(link);
+      link.click();
+
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("Не удалось выгрузить проект в Excel. Попробуйте позже.");
+    }
+  };
+
   const userOptions = users.map(u => {
     const fullName = `${u.first_name || u.firstName || ''} ${u.last_name || u.lastName || ''}`.trim();
     return { value: u.id, label: fullName || u.username || u.email || `Сотрудник №${u.id}` };
@@ -358,7 +380,7 @@ function ProjectDetail() {
       assignee: newTaskAssignee, participants: newTaskParticipants,
       parent_task: newTaskParent ? parseInt(newTaskParent) : null,
       linked_tasks: newTaskLinkedTasks,
-      dependencies: newTaskLinkedTasks // <--- ДОБАВИЛИ ЭТО!
+      dependencies: newTaskLinkedTasks
     };
 
     try {
@@ -403,18 +425,16 @@ function ProjectDetail() {
       setTaskToComplete(editingTask); setCompletionDelayReason(editingTask.delay_reason || ''); setIsCompletionModalOpen(true); setIsEditModalOpen(false); return;
     }
     try {
-  // Клонируем данные формы и дублируем связи в поле dependencies, которое ждет бэкенд
-  const payloadToUpdate = {
-    ...editFormData,
-    dependencies: editFormData.linked_tasks
-  };
+      const payloadToUpdate = {
+        ...editFormData,
+        dependencies: editFormData.linked_tasks
+      };
 
-  const response = await api.patch(`tasks/${editingTask.id}/`, payloadToUpdate);
-  setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
-  setIsEditModalOpen(false);
-  setEditingTask(null);
-}
-    catch (error) { alert("Ошибка сохранения"); }
+      const response = await api.patch(`tasks/${editingTask.id}/`, payloadToUpdate);
+      setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
+      setIsEditModalOpen(false);
+      setEditingTask(null);
+    } catch (error) { alert("Ошибка сохранения"); }
   };
 
   const handleQuickDelete = async (taskId) => {
@@ -491,6 +511,10 @@ function ProjectDetail() {
           {isFullAccess && (
             <>
               <button onClick={() => fileInputRef.current.click()} className="flex-1 sm:flex-none px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-lg text-sm shadow-sm whitespace-nowrap">📥 Импорт</button>
+
+              {/* НОВАЯ КНОПКА ЭКСПОРТА В EXCEL */}
+              <button onClick={handleExportExcel} className="flex-1 sm:flex-none px-4 py-2 border border-green-300 bg-green-50 hover:bg-green-100 text-green-600 font-semibold rounded-lg text-sm shadow-sm whitespace-nowrap">📊 Экспорт Excel</button>
+
               <button onClick={() => { setEditProjectTitle(project.title); setIsProjectEditModalOpen(true); }} className="flex-1 sm:flex-none px-4 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold rounded-lg text-sm shadow-sm whitespace-nowrap">✏️ Изменить</button>
               <button onClick={handleDeleteProject} className="flex-1 sm:flex-none px-4 py-2 border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-lg text-sm shadow-sm whitespace-nowrap">🗑️ Удалить</button>
             </>

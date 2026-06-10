@@ -22,6 +22,9 @@ import xml.etree.ElementTree as ET
 import csv
 import io
 import re
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta, date
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import PermissionDenied
@@ -261,6 +264,100 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             return Response({"error": f"Ошибка парсинга XML: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['get'])
+    def export_excel(self, request, pk=None):
+        """
+        Выгрузка всех задач текущего проекта в красивый Excel-файл.
+        """
+        project = self.get_object()
+        # Вытаскиваем все задачи этого проекта, сортируя по дате начала
+        tasks = Task.objects.filter(project=project).order_by('plan_start_date')
+
+        # 1. Создаем рабочую книгу Excel
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Список задач"
+
+        # 2. Объявляем стили оформления
+        font_title = Font(name='Arial', size=14, bold=True, color='1E293B')
+        font_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+        font_body = Font(name='Arial', size=10)
+
+        # Красивый темно-синий цвет для шапки (как в дорогих ERP)
+        fill_header = PatternFill(start_color='1E3A8A', end_color='1E3A8A', fill_type='solid')
+
+        align_center = Alignment(horizontal='center', vertical='center')
+        align_left = Alignment(horizontal='left', vertical='center')
+
+        # 3. Добавляем главный заголовок документа
+        ws.merge_cells('A1:H1')
+        ws['A1'] = f"Проект: {project.title}"
+        ws['A1'].font = font_title
+        ws.row_dimensions[1].height = 30
+        ws.append([])  # Пустая строка для визуального отступа
+
+        # 4. Создаем шапку таблицы
+        headers = ["ID", "Название задачи", "Описание", "Исполнитель", "Статус", "Критичность", "Дата начала",
+                   "Дедлайн"]
+        ws.append(headers)
+
+        # Стилизуем шапку (строка №3)
+        ws.row_dimensions[3].height = 25
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=3, column=col_num)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = align_center
+
+        # Словари для человекочитаемого перевода статусов и приоритетов
+        status_mapping = {'new': 'Новая', 'in_progress': 'В работе', 'completed': 'Завершена'}
+        priority_mapping = {'low': 'Низкая', 'medium': 'Средняя', 'high': 'Высокая', 'critical': 'Критичная'}
+
+        # 5. Заполняем таблицу данными из БД
+        for task in tasks:
+            # Безопасно получаем имя исполнителя
+            assignee_name = "Не назначен"
+            if task.assignee:
+                assignee_name = task.assignee.get_full_name() or task.assignee.username
+
+            row = [
+                task.id,
+                task.title,
+                task.description or "",
+                assignee_name,
+                status_mapping.get(task.status, task.status),
+                priority_mapping.get(task.priority, task.priority),
+                task.plan_start_date.strftime('%Y-%m-%d') if task.plan_start_date else "",
+                task.plan_end_date.strftime('%Y-%m-%d') if task.plan_end_date else ""
+            ]
+            ws.append(row)
+
+        # 6. Тонкая настройка: авто-подбор ширины колонок по контенту
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)  # минимум 12 символов
+
+        # 7. Выравнивание текста в ячейках данных и шрифты
+        for row in ws.iter_rows(min_row=4, max_row=ws.max_row, min_col=1, max_col=8):
+            ws.row_dimensions[row[0].row].height = 20  # Высота строк данных
+            for cell in row:
+                cell.font = font_body
+                # Даты, ID, Статусы и Критичность — по центру, тексты — по левому краю
+                if cell.column in [1, 5, 6, 7, 8]:
+                    cell.alignment = align_center
+                else:
+                    cell.alignment = align_left
+
+        # 8. Формируем HTTP-ответ в виде файла Excel
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        # Кодируем название файла, чтобы оно не ломалось из-за кириллицы
+        filename = f"Project_{project.id}_Tasks.xlsx"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        wb.save(response)
+        return response
 
     # ==========================================
     # 2. ИМПОРТ ИЗ GANTT PRO (CSV)
