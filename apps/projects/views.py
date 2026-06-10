@@ -401,7 +401,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     # НОВЫЙ БЛОК: Логика взаимодействия с задачей
     # ==========================================
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def hide(self, request, pk=None):
         """
         Скрытие задачи с доски Участника и автоматический лог в комментарии.
