@@ -366,22 +366,23 @@ class TaskViewSet(viewsets.ModelViewSet):
         user = self.request.user
 
         # ОПТИМИЗАЦИЯ БД 2: Убиваем N+1 запросы для задач
-        # Добавил сюда 'hidden_for' и 'participants' на всякий случай, чтобы они тоже кэшировались
         queryset = Task.objects.select_related(
             'project', 'assignee', 'parent_task'
         ).prefetch_related(
             'comments', 'attachments', 'dependencies', 'participants', 'hidden_for'
         )
 
-        # 1. Фильтр по проекту (для страницы проекта)
+        # 1. Фильтр по проекту (для страницы внутри конкретного проекта)
         project_id = self.request.query_params.get('project')
         if project_id:
-            queryset = queryset.filter(Q(assignee=user) | Q(participants=user)).distinct()
+            # ИСПРАВЛЕНО: Здесь фильтруем именно по ID проекта!
+            queryset = queryset.filter(project_id=project_id)
 
-        # 2. ФИЛЬТР: Только мои задачи (где я ответственный)
+        # 2. ФИЛЬТР: Только "Мои задачи" (Исполнитель ИЛИ Участник)
         assigned_to_me = self.request.query_params.get('assigned_to_me')
         if assigned_to_me == 'true':
-            queryset = queryset.filter(assignee=user)
+            # ИСПРАВЛЕНО: Вот здесь должны быть Q-объекты!
+            queryset = queryset.filter(Q(assignee=user) | Q(participants=user)).distinct()
 
         # 3. НОВЫЙ ФИЛЬТР: Исключаем задачи, которые участник "смахнул" со своей доски
         if user.is_authenticated:
