@@ -356,7 +356,9 @@ function ProjectDetail() {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
       project: parseInt(id), plan_start_date: newTaskPlanStart, plan_end_date: newTaskPlanEnd,
       assignee: newTaskAssignee, participants: newTaskParticipants,
-      parent_task: newTaskParent ? parseInt(newTaskParent) : null, linked_tasks: newTaskLinkedTasks
+      parent_task: newTaskParent ? parseInt(newTaskParent) : null,
+      linked_tasks: newTaskLinkedTasks,
+      dependencies: newTaskLinkedTasks // <--- ДОБАВИЛИ ЭТО!
     };
 
     try {
@@ -401,10 +403,17 @@ function ProjectDetail() {
       setTaskToComplete(editingTask); setCompletionDelayReason(editingTask.delay_reason || ''); setIsCompletionModalOpen(true); setIsEditModalOpen(false); return;
     }
     try {
-      const response = await api.patch(`tasks/${editingTask.id}/`, editFormData);
-      setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
-      setIsEditModalOpen(false); setEditingTask(null);
-    }
+  // Клонируем данные формы и дублируем связи в поле dependencies, которое ждет бэкенд
+  const payloadToUpdate = {
+    ...editFormData,
+    dependencies: editFormData.linked_tasks
+  };
+
+  const response = await api.patch(`tasks/${editingTask.id}/`, payloadToUpdate);
+  setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
+  setIsEditModalOpen(false);
+  setEditingTask(null);
+}
     catch (error) { alert("Ошибка сохранения"); }
   };
 
