@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import Select from 'react-select';
-import { Link } from 'react-router-dom'; // <-- ВОТ ТОТ САМЫЙ СПАСИТЕЛЬНЫЙ ИМПОРТ
+import { Link } from 'react-router-dom';
 import api from '../api';
 
 function MyTasks() {
@@ -77,6 +77,8 @@ function MyTasks() {
     return { value: u.id, label: fullName || u.username || u.email || `Сотрудник №${u.id}` };
   }), [users]);
 
+  const projectOptions = useMemo(() => projects.map(p => ({ value: p.id, label: p.title })), [projects]);
+
   const handleDragEnd = async (result) => {
     if (!result.destination) return;
     const { source, destination, draggableId } = result;
@@ -109,21 +111,40 @@ function MyTasks() {
     }
 
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-    try { await api.patch(`tasks/${taskId}/`, { status: newStatus }); }
-    catch (error) { alert("Ошибка смены статуса."); fetchData(); }
+
+    try {
+      await api.patch(`tasks/${taskId}/`, { status: newStatus });
+
+      const fullName = `${currentUser.last_name || ''} ${currentUser.first_name || ''}`.trim() || currentUser.username;
+      let autoText = '';
+      if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
+      if (newStatus === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
+
+      if (autoText) {
+          const commentRes = await api.post(`tasks/${taskId}/add_comment/`, { text: autoText });
+          setTasks(prev => prev.map(t => t.id === taskId ? { ...t, comments: [...(t.comments || []), commentRes.data] } : t));
+      }
+    } catch (error) { alert("Ошибка смены статуса."); fetchData(); }
   };
 
   const handleConfirmCompletion = async (e) => {
     e.preventDefault();
     if (!completionDelayReason.trim()) return alert("Укажите причину просрочки!");
     const payload = { status: 'completed', delay_reason: completionDelayReason, actual_end_date: today };
-    setTasks(prev => prev.map(t => t.id === taskToComplete.id ? { ...t, ...payload } : t));
     setIsCompletionModalOpen(false);
 
     try {
-      await api.patch(`tasks/${taskToComplete.id}/`, payload);
+      const response = await api.patch(`tasks/${taskToComplete.id}/`, payload);
+      let updatedTask = response.data;
+
+      const fullName = `${currentUser.last_name || ''} ${currentUser.first_name || ''}`.trim() || currentUser.username;
+      const commentRes = await api.post(`tasks/${taskToComplete.id}/add_comment/`, {
+          text: `✅ ${fullName} завершил(а) задачу с просрочкой.\nПричина: ${completionDelayReason}`
+      });
+      updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
+
+      setTasks(prev => prev.map(t => t.id === taskToComplete.id ? updatedTask : t));
       setTaskToComplete(null); setCompletionDelayReason('');
-      fetchData();
     } catch (error) { alert("Ошибка."); fetchData(); }
   };
 
@@ -132,7 +153,8 @@ function MyTasks() {
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
-      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, participants: task.participants || [], priority: task.priority || 'medium'
+      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, participants: task.participants || [], priority: task.priority || 'medium',
+      project: task.project || null
     });
     setNewCommentText('');
     setIsEditModalOpen(true);
@@ -160,9 +182,24 @@ function MyTasks() {
 
     const payload = { ...editFormData };
     if (!payload.plan_start_date) payload.plan_start_date = null;
+
     try {
       const response = await api.patch(`tasks/${editingTask.id}/`, payload);
-      setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
+      let updatedTask = response.data;
+
+      if (editingTask.status !== editFormData.status) {
+         const fullName = `${currentUser.last_name || ''} ${currentUser.first_name || ''}`.trim() || currentUser.username;
+         let autoText = '';
+         if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
+         if (editFormData.status === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
+         if (editFormData.status === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
+         if (autoText) {
+             const commentRes = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: autoText });
+             updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
+         }
+      }
+
+      setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? updatedTask : t));
       setIsEditModalOpen(false); setEditingTask(null);
     } catch (error) { alert("Ошибка"); }
   };
@@ -233,7 +270,7 @@ function MyTasks() {
     <div className="h-full flex flex-col">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-800">Мои задачи</h1>
-        <p className="text-sm text-gray-500 mt-1">Все задачи, в которых вы назначены ответственным</p>
+        <p className="text-sm text-gray-500 mt-1">Все задачи, в которых вы назначены ответственным или участником</p>
       </div>
 
       <DragDropContext onDragEnd={handleDragEnd}>
@@ -242,8 +279,6 @@ function MyTasks() {
             const columnTasks = tasks.filter(task => {
               const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
               const isParticipant = (task.participants || []).includes(currentUser?.id);
-  // ТЕПЕРЬ ПРАВИЛЬНО: Задача попадает в колонку, если статус совпадает
-  // И текущий пользователь является либо Исполнителем, либо Участником
               return task.status === column.id && (taskAssigneeId == currentUser?.id || isParticipant);
             });
             return (
@@ -288,15 +323,11 @@ function MyTasks() {
         </div>
       </DragDropContext>
 
-      {/* === ЕДИНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ (FLEX-СТРУКТУРА) === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] h-[90vh] flex flex-col overflow-hidden">
-
             <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
-
               {canEditAll ? (
-                // --- ВЬЮШКА ДЛЯ БОССА ---
                 <>
                   <div className="w-full md:w-2/3 flex flex-col bg-white border-r border-gray-200 min-h-0">
                     <div className="flex-1 overflow-y-auto p-6 md:p-8">
@@ -311,6 +342,10 @@ function MyTasks() {
                       <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
                         <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="sm:col-span-2">
+                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Проект</label>
+                            <Select options={projectOptions} value={projectOptions.find(o => o.value == editFormData.project) || null} onChange={(opt) => setEditFormData({...editFormData, project: opt ? opt.value : null})} placeholder="Выбрать проект..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
+                          </div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                           <div>
@@ -343,12 +378,8 @@ function MyTasks() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Правая колонка (Чат) */}
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 min-h-0">
-                    <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200">
-                       <h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4>
-                    </div>
+                    <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200"><h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4></div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
@@ -377,7 +408,6 @@ function MyTasks() {
                   </div>
                 </>
               ) : (
-                // --- ВЬЮШКА ДЛЯ ИСПОЛНИТЕЛЯ / УЧАСТНИКА ---
                 <>
                   <div className="w-full md:w-2/3 flex flex-col bg-slate-50 border-r border-gray-200 min-h-0 order-2 md:order-1">
                     <div className="p-6 md:px-8 pb-4 flex-shrink-0 border-b border-gray-200 bg-white">
