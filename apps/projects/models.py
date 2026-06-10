@@ -115,7 +115,7 @@ class Comment(models.Model):
 class Attachment(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='attachments', verbose_name="Задача")
 
-    file = models.FileField(upload_to='attachments/%Y/%m/%d/', verbose_name= "Файл")
+    file = models.FileField(upload_to='attachments/%Y/%m/%d/', verbose_name= "Файл", max_length=500)
 
     uploaded_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, verbose_name="Кто загрузил")
     upload_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата загрузки")
