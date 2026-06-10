@@ -726,39 +726,77 @@ class EmployeeReportView(APIView):
             return Response({"error": "Сотрудник не найден"}, status=status.HTTP_404_NOT_FOUND)
 
         today = timezone.now().date()
+        tasks = Task.objects.filter(assignee=employee).order_by('-id')
 
-        stats = Task.objects.filter(assignee=employee).aggregate(
+        # Считаем статистику
+        stats = tasks.aggregate(
             total_tasks=Count('id'),
             completed_tasks=Count('id', filter=Q(status='completed')),
             overdue_tasks=Count('id', filter=~Q(status='completed') & Q(plan_end_date__lt=today)),
             in_progress_tasks=Count('id', filter=Q(status='in_progress'))
         )
 
-        if request.query_params.get('export') == 'excel':
-            excel_file = generate_employee_excel(employee, stats)
+        # 1. Создаем Excel
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Отчет по сотруднику"
 
-            response = HttpResponse(
-                excel_file.read(),
-                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            )
+        # Стили
+        font_title = Font(name='Arial', size=14, bold=True)
+        font_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+        fill_header = PatternFill(start_color='1E3A8A', end_color='1E3A8A', fill_type='solid')
+        align_center = Alignment(horizontal='center', vertical='center')
 
-            filename = f"report_employee_{employee.id}.xlsx"
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        # 2. Заголовок и статистика
+        ws.merge_cells('A1:E1')
+        ws[
+            'A1'] = f"Отчет по сотруднику: {employee.get_full_name() or employee.username} ({employee.position or 'Должность не указана'})"
+        ws['A1'].font = font_title
+        ws.row_dimensions[1].height = 25
 
-            return response
+        ws.append(["Всего задач:", stats['total_tasks']])
+        ws.append(["В работе:", stats['in_progress_tasks']])
+        ws.append(["Завершено:", stats['completed_tasks']])
+        ws.append(["Просрочено:", stats['overdue_tasks']])
+        ws.append([])  # Пустая строка для отступа
 
-        report_data = {
-            "employee_id": employee.id,
-            "employee_name": employee.get_full_name(),
-            "position": employee.position,
-            "statistics": {
-                "total": stats['total_tasks'],
-                "completed": stats['completed_tasks'],
-                "in_progress": stats['in_progress_tasks'],
-                "overdue": stats['overdue_tasks'],
-            }
-        }
-        return Response(report_data, status=status.HTTP_200_OK)
+        # 3. Шапка таблицы задач
+        headers = ["ID", "Название задачи", "Статус", "Критичность", "Дедлайн"]
+        ws.append(headers)
+
+        header_row_idx = ws.max_row
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=header_row_idx, column=col_num)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = align_center
+
+        # 4. Данные задач
+        status_map = {'new': 'Новая', 'in_progress': 'В работе', 'completed': 'Завершена'}
+        priority_map = {'low': 'Низкая', 'medium': 'Средняя', 'high': 'Высокая', 'critical': 'Критичная'}
+
+        for task in tasks:
+            ws.append([
+                task.id,
+                task.title,
+                status_map.get(task.status, task.status),
+                priority_map.get(task.priority, task.priority),
+                task.plan_end_date.strftime('%Y-%m-%d') if task.plan_end_date else "Не указан"
+            ])
+
+        # 5. Выравнивание ширины колонок
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 2, 12)
+
+        # 6. Отдаем файл
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        filename = f"Employee_{employee.id}_Report.xlsx"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        wb.save(response)
+
+        return response
+
 
 class ProjectReportView(APIView):
     def get(self, request, project_id):
@@ -768,8 +806,9 @@ class ProjectReportView(APIView):
             return Response({"error": "Проект не найден"}, status=status.HTTP_404_NOT_FOUND)
 
         today = timezone.now().date()
-        tasks = project.tasks.all()
+        tasks = project.tasks.all()  # Убедись, что related_name в модели Task равен 'tasks'
 
+        # Считаем общую стату
         project_stats = tasks.aggregate(
             total=Count('id'),
             completed=Count('id', filter=Q(status='completed')),
@@ -777,40 +816,72 @@ class ProjectReportView(APIView):
             overdue=Count('id', filter=~Q(status='completed') & Q(plan_end_date__lt=today))
         )
 
+        # Считаем стату по сотрудникам
         employee_stats = tasks.values(
-            'assignee__id',
-            'assignee__first_name',
-            'assignee__last_name'
+            'assignee__id', 'assignee__first_name', 'assignee__last_name'
         ).annotate(
             total_tasks=Count('id'),
             overdue_tasks=Count('id', filter=~Q(status='completed') & Q(plan_end_date__lt=today))
         )
 
-        employees_data = []
+        # 1. Создаем Excel
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Отчет по проекту"
+
+        font_title = Font(name='Arial', size=14, bold=True)
+        font_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+        fill_header = PatternFill(start_color='0F766E', end_color='0F766E', fill_type='solid')  # Темно-бирюзовый
+        align_center = Alignment(horizontal='center', vertical='center')
+
+        # 2. Заголовок и общая статистика
+        ws.merge_cells('A1:D1')
+        ws['A1'] = f"Проект: {project.title} (Статус: {project.get_status_display()})"
+        ws['A1'].font = font_title
+        ws.row_dimensions[1].height = 25
+
+        ws.append(["Всего задач:", project_stats['total']])
+        ws.append(["В работе:", project_stats['in_progress']])
+        ws.append(["Завершено:", project_stats['completed']])
+        ws.append(["Просрочено:", project_stats['overdue']])
+        ws.append([])
+
+        # 3. Статистика по исполнителям (Таблица 1)
+        ws.append(["Статистика по исполнителям"])
+        ws.cell(row=ws.max_row, column=1).font = Font(bold=True, size=12)
+
+        emp_headers = ["ID", "Сотрудник", "Всего задач", "Просрочено"]
+        ws.append(emp_headers)
+
+        for col_num, header in enumerate(emp_headers, 1):
+            cell = ws.cell(row=ws.max_row, column=col_num)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = align_center
+
         for emp in employee_stats:
-            if emp['assignee__id']:
-                name = f"{emp['assignee__first_name']} {emp['assignee__last_name']}".strip()
-                if not name:
-                    name = f"Пользователь ID {emp['assignee__id']}"
-            else:
-                name = "Не назначен"
+            name = f"{emp['assignee__first_name'] or ''} {emp['assignee__last_name'] or ''}".strip()
+            ws.append([
+                emp['assignee__id'] or "-",
+                name if name else ("Не назначен" if not emp['assignee__id'] else f"Пользователь {emp['assignee__id']}"),
+                emp['total_tasks'],
+                emp['overdue_tasks']
+            ])
 
-            employees_data.append({
-                "employee_id": emp['assignee__id'],
-                "name": name,
-                "total_tasks": emp['total_tasks'],
-                "overdue_tasks": emp['overdue_tasks']
-            })
+        ws.append([])
 
-        report_data = {
-            "project_id": project.id,
-            "project_title": project.title,
-            "project_status": project.get_status_display(),
-            "overall_statistics": project_stats,
-            "employees_breakdown": employees_data
-        }
+        # 4. Выравнивание ширины колонок
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 2, 14)
 
-        return Response(report_data, status=status.HTTP_200_OK)
+        # 5. Отдаем файл
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        filename = f"Project_{project.id}_Report.xlsx"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        wb.save(response)
+
+        return response
 
 class NewsPagination(PageNumberPagination):
     page_size = 3
