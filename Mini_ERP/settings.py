@@ -57,6 +57,9 @@ CSRF_TRUSTED_ORIGINS = [
     # Если позже прикрутишь домен, обязательно добавь его сюда, например:
     # "https://erp.tvoy-domen.ru",
 ]
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
