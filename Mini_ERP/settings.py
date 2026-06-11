@@ -19,7 +19,7 @@ SECRET_KEY = 'django-insecure-@o1_4p)s6uw-&qq=oz4hfrblr=orj+2)^jf(1k*_zgbx!n9duz
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 # ИСПРАВЛЕНО: синтаксис Python требует строк в списке
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['186.246.7.109', '127.0.0.1', 'localhost', 'erp.domain.ru']
 
 # Application definition
 INSTALLED_APPS = [
@@ -52,7 +52,8 @@ ROOT_URLCONF = 'Mini_ERP.urls'
 
 CSRF_TRUSTED_ORIGINS = [
     "http://186.246.7.109:8080",
-    "http://186.246.7.109", # На случай, если уберешь порт 8080
+    "http://186.246.7.109",
+    "https://erp.stekufa.ru"# На случай, если уберешь порт 8080
     # Если позже прикрутишь домен, обязательно добавь его сюда, например:
     # "https://erp.tvoy-domen.ru",
 ]

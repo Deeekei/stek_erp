@@ -59,7 +59,7 @@ services:
     build: ./frontend
     restart: always
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     volumes:
       - static_volume:/app/static
       - ./media:/app/media:ro

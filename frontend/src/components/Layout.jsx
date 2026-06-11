@@ -167,7 +167,7 @@ function Layout({ children, onLogout }) {
         md:relative md:translate-x-0`}
       >
         <div className="p-6 flex justify-between items-center">
-          <h1 className="text-2xl font-black text-red-500 tracking-wider">MINI ERP</h1>
+          <h1 className="text-2xl font-black text-red-500 tracking-wider">ERP</h1>
           <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-white">✕</button>
         </div>
 
