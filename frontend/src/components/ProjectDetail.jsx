@@ -12,10 +12,17 @@ function ProjectDetail() {
   const fileInputRef = useRef(null);
   const ganttContainerRef = useRef(null);
 
+  // Стейты для перемещения по Ганту
   const isDragging = useRef(false);
   const lastX = useRef(0);
   const lastY = useRef(0);
   const scrollContainerRef = useRef(null);
+
+  // === НОВЫЕ СТЕЙТЫ ДЛЯ ИЗМЕНЕНИЯ ШИРИНЫ КОЛОНКИ ГАНТА ===
+  const isResizingColumn = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+  const [listWidth, setListWidth] = useState(window.innerWidth < 768 ? 180 : 380);
 
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -160,11 +167,10 @@ function ProjectDetail() {
     } finally { e.target.value = ''; }
   };
 
-  // НОВАЯ ФУНКЦИЯ ДЛЯ ВЫГРУЗКИ EXCEL
   const handleExportExcel = async () => {
     try {
       const response = await api.get(`projects/${id}/export_excel/`, {
-        responseType: 'blob', // Важно для бинарных файлов
+        responseType: 'blob',
       });
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -238,24 +244,59 @@ function ProjectDetail() {
     };
   });
 
+  // === ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ РЕСАЙЗА И СКРОЛЛИНГА ===
+  const startResizingColumn = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizingColumn.current = true;
+    startX.current = e.pageX;
+    startWidth.current = listWidth;
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
   useEffect(() => {
     const handleMouseMove = (e) => {
+      // 1. Изменение ширины колонки
+      if (isResizingColumn.current) {
+        e.preventDefault();
+        const newWidth = Math.max(100, Math.min(800, startWidth.current + (e.pageX - startX.current)));
+        setListWidth(newWidth);
+        return;
+      }
+
+      // 2. Скроллинг Ганта
       if (!isDragging.current) return;
       e.preventDefault();
       if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft -= (e.pageX - lastX.current);
       if (ganttContainerRef.current) ganttContainerRef.current.scrollTop -= (e.pageY - lastY.current);
       lastX.current = e.pageX; lastY.current = e.pageY;
     };
+
     const handleMouseUp = () => {
+      // Отпускаем ресайзер
+      if (isResizingColumn.current) {
+        isResizingColumn.current = false;
+        document.body.style.removeProperty('cursor');
+        document.body.style.removeProperty('user-select');
+        return;
+      }
+
+      // Отпускаем скроллинг
       if (!isDragging.current) return;
       isDragging.current = false;
       if (scrollContainerRef.current) scrollContainerRef.current.style.cursor = 'grab';
       if (ganttContainerRef.current) ganttContainerRef.current.style.cursor = 'grab';
       document.body.style.removeProperty('user-select');
     };
+
     window.addEventListener('mousemove', handleMouseMove, { passive: false });
     window.addEventListener('mouseup', handleMouseUp);
-    return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
   }, []);
 
   const handleGanttPointerDown = (e) => {
@@ -511,10 +552,7 @@ function ProjectDetail() {
           {isFullAccess && (
             <>
               <button onClick={() => fileInputRef.current.click()} className="flex-1 sm:flex-none px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-lg text-sm shadow-sm whitespace-nowrap">📥 Импорт</button>
-
-              {/* НОВАЯ КНОПКА ЭКСПОРТА В EXCEL */}
               <button onClick={handleExportExcel} className="flex-1 sm:flex-none px-4 py-2 border border-green-300 bg-green-50 hover:bg-green-100 text-green-600 font-semibold rounded-lg text-sm shadow-sm whitespace-nowrap">📊 Экспорт Excel</button>
-
               <button onClick={() => { setEditProjectTitle(project.title); setIsProjectEditModalOpen(true); }} className="flex-1 sm:flex-none px-4 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold rounded-lg text-sm shadow-sm whitespace-nowrap">✏️ Изменить</button>
               <button onClick={handleDeleteProject} className="flex-1 sm:flex-none px-4 py-2 border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-lg text-sm shadow-sm whitespace-nowrap">🗑️ Удалить</button>
             </>
@@ -588,7 +626,26 @@ function ProjectDetail() {
               </div>
               <div className="flex-1 overflow-auto relative select-none" ref={ganttContainerRef} onPointerDownCapture={handleGanttPointerDown} onWheelCapture={handleGanttWheel}>
                 {ganttTasks.length > 0 ? (
-                  <Gantt tasks={ganttTasks} viewMode={ganttZoom} onDateChange={handleGanttDateChange} onExpanderClick={handleExpanderClick} TaskListHeader={CustomTaskListHeader} TaskListTable={CustomTaskListTable} listCellWidth={isMobile ? 180 : 380} locale="ru" />
+                  <>
+                    <Gantt
+                      tasks={ganttTasks}
+                      viewMode={ganttZoom}
+                      onDateChange={handleGanttDateChange}
+                      onExpanderClick={handleExpanderClick}
+                      TaskListHeader={CustomTaskListHeader}
+                      TaskListTable={CustomTaskListTable}
+                      listCellWidth={listWidth}
+                      locale="ru"
+                    />
+
+                    {/* НОВЫЙ ПОЛЗУНОК ДЛЯ ИЗМЕНЕНИЯ ШИРИНЫ */}
+                    <div
+                      onPointerDown={startResizingColumn}
+                      className="absolute top-0 bottom-0 z-10 w-2 sm:w-3 cursor-col-resize hover:bg-blue-500/50 transition-colors"
+                      style={{ left: listWidth - 1 }}
+                      title="Потяните, чтобы изменить ширину"
+                    />
+                  </>
                 ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
               </div>
             </div>
@@ -608,19 +665,13 @@ function ProjectDetail() {
         </div>
       )}
 
-      {/* === ЕДИНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ (FLEX-СТРУКТУРА) === */}
+      {/* === ЕДИНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
-          {/* Контейнер модалки с жесткой высотой, чтобы футер не плавал */}
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1200px] h-[90vh] flex flex-col overflow-hidden">
-
-            {/* Обертка для колонок (тянется на все свободное место) */}
             <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-
               {canEditAll ? (
-                // --- ВЬЮШКА ДЛЯ БОССА ---
                 <>
-                  {/* Левая колонка (Форма) */}
                   <div className="w-full md:w-2/3 p-6 md:p-8 overflow-y-auto border-r border-gray-200 bg-white">
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex items-center gap-2">
@@ -665,13 +716,15 @@ function ProjectDetail() {
                     </div>
                   </div>
 
-                  {/* Правая колонка (Чат) */}
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 p-6 md:p-8">
                     <h4 className="text-lg font-extrabold text-gray-800 mb-4 flex-shrink-0 flex items-center gap-2">💬 Чат</h4>
                     <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name.includes(currentUser.first_name);
+                          const isMe = currentUser && c.author_name && (
+                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                            (currentUser.username && c.author_name.includes(currentUser.username))
+                          );
                           return (
                             <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                               <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
@@ -694,9 +747,7 @@ function ProjectDetail() {
                   </div>
                 </>
               ) : (
-                // --- ВЬЮШКА ДЛЯ ИСПОЛНИТЕЛЯ / УЧАСТНИКА ---
                 <>
-                  {/* Левая колонка (ЧАТ - ШИРОКАЯ) */}
                   <div className="w-full md:w-2/3 flex flex-col bg-slate-50 border-r border-gray-200 p-6 md:p-8 order-2 md:order-1">
                     <div className="flex justify-between items-start mb-4 flex-shrink-0">
                       <div className="flex items-center gap-2">
@@ -712,7 +763,10 @@ function ProjectDetail() {
                     <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name.includes(currentUser.first_name);
+                          const isMe = currentUser && c.author_name && (
+                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                            (currentUser.username && c.author_name.includes(currentUser.username))
+                          );
                           return (
                             <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                               <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
@@ -736,7 +790,6 @@ function ProjectDetail() {
                     )}
                   </div>
 
-                  {/* Правая колонка (ДЕТАЛИ И ФАЙЛЫ - УЗКАЯ) */}
                   <div className="w-full md:w-1/3 p-6 md:p-8 overflow-y-auto bg-white flex flex-col order-1 md:order-2">
                     <div className={`mb-6 p-4 rounded-xl border ${isWorkerTask ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
                       <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Статус задачи</label>
@@ -790,7 +843,6 @@ function ProjectDetail() {
               )}
             </div>
 
-            {/* Футер: теперь он часть потока, а не absolute, поэтому никогда не перекроет контент */}
             <div className="bg-gray-50 border-t border-gray-200 p-4 flex flex-col sm:flex-row justify-end gap-3 flex-shrink-0">
              <button onClick={() => setIsEditModalOpen(false)} className="w-full sm:w-auto px-6 py-2 bg-white text-gray-700 rounded-lg font-bold hover:bg-gray-100 transition-colors border border-gray-300">Закрыть</button>
              {canEditAll && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить изменения</button>}
