@@ -19,7 +19,7 @@ SECRET_KEY = 'django-insecure-@o1_4p)s6uw-&qq=oz4hfrblr=orj+2)^jf(1k*_zgbx!n9duz
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 # ИСПРАВЛЕНО: синтаксис Python требует строк в списке
-ALLOWED_HOSTS = ['186.246.7.109', '127.0.0.1', 'localhost', 'erp.domain.ru']
+ALLOWED_HOSTS = ['186.246.7.109', '127.0.0.1', 'localhost', 'erp.stekufa.ru']
 
 # Application definition
 INSTALLED_APPS = [
