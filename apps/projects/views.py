@@ -552,6 +552,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         """
         Перехватываем сохранение задачи и жестко проверяем права на уровне полей.
         """
+        partial = kwargs.pop('partial', False)
         task = self.get_object()
         user = request.user
         project = task.project
@@ -565,32 +566,31 @@ class TaskViewSet(viewsets.ModelViewSet):
                 (project.visibility == 'selected' and project.allowed_users.filter(id=user.id).exists())
         )
 
-        # Если пользователь НЕ босс
+        # 1. Создаем копию присланных данных (чтобы не трогать неизменяемый request.data)
+        data_to_save = request.data.copy()
+
+        # 2. Фильтруем данные, если пользователь НЕ босс
         if not is_boss:
             if user == task.assignee:
-                # Если это ИСПОЛНИТЕЛЬ: Оставляем в запросе только разрешенные поля.
-                # Все попытки изменить сроки, название или приоритет будут просто проигнорированы.
+                # Если это ИСПОЛНИТЕЛЬ: Оставляем в копии только разрешенные поля.
                 allowed_keys = ['status', 'delay_reason', 'actual_end_date']
-
-                if isinstance(request.data, dict):
-                    # Если данные пришли как обычный JSON
-                    request.data = {k: v for k, v in request.data.items() if k in allowed_keys}
-                else:
-                    # Если данные пришли как FormData (QueryDict, он по умолчанию иммутабельный)
-                    request.data._mutable = True
-                    for key in list(request.data.keys()):
-                        if key not in allowed_keys:
-                            request.data.pop(key)
-                    request.data._mutable = False
+                data_to_save = {k: v for k, v in data_to_save.items() if k in allowed_keys}
             else:
-                # Если это просто участник (или вообще левый юзер) — запрещаем редактирование тела задачи.
-                # Комментарии и файлы работают через другие эндпоинты, так что они не пострадают.
+                # Если это просто участник — запрещаем редактирование тела задачи.
                 return Response(
                     {'detail': 'У вас нет прав на редактирование параметров этой задачи.'},
                     status=status.HTTP_403_FORBIDDEN
                 )
 
-        return super().update(request, *args, **kwargs)
+        # 3. Выполняем стандартную логику DRF, но передаем нашу отфильтрованную копию (data_to_save)
+        serializer = self.get_serializer(task, data=data_to_save, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if getattr(task, '_prefetched_objects_cache', None):
+            task._prefetched_objects_cache = {}
+
+        return Response(serializer.data)
 
     def perform_update(self, serializer):
         """ Триггер 2: Обновление задачи (смена статуса/сроков) """
