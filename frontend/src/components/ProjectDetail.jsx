@@ -18,7 +18,7 @@ function ProjectDetail() {
   const lastY = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // === СТЕЙТЫ ДЛЯ ИЗМЕНЕНИЯ ШИРИНЫ ===
+  // Стейты для изменения ширины
   const isResizingColumn = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
@@ -32,6 +32,10 @@ function ProjectDetail() {
   const [users, setUsers] = useState([]);
   const [loadingProject, setLoadingProject] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(true);
+
+  // === СТЕЙТЫ ДЛЯ ФИЛЬТРОВ ===
+  const [filterTaskName, setFilterTaskName] = useState('');
+  const [filterAssignee, setFilterAssignee] = useState(null);
 
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -235,10 +239,43 @@ function ProjectDetail() {
     return { backgroundColor: isParent ? theme.prog : theme.bg, backgroundSelectedColor: isParent ? theme.progSel : theme.bgSel, progressColor: theme.prog, progressSelectedColor: theme.progSel };
   };
 
-  const ganttTasks = orderedTasks.filter(t => t.plan_start_date && t.plan_end_date && !isTaskHidden(t)).map(t => {
+  // === ЛОГИКА ФИЛЬТРАЦИИ ЗАДАЧ ===
+  let finalOrderedTasks = orderedTasks;
+  if (filterTaskName || filterAssignee) {
+    const matchedIds = new Set();
+
+    // Ищем задачи, подходящие под фильтр
+    tasks.forEach(t => {
+      const matchName = t.title.toLowerCase().includes(filterTaskName.toLowerCase());
+      const tAssigneeId = t.assignee && typeof t.assignee === 'object' ? t.assignee.id : t.assignee;
+      const matchAssignee = filterAssignee ? tAssigneeId === filterAssignee : true;
+
+      if (matchName && matchAssignee) {
+        matchedIds.add(t.id);
+
+        // Умный шаг: если подзадача подошла, обязательно оставляем её родителя,
+        // иначе библиотека Ганта сломается из-за нарушенной структуры
+        let current = t;
+        while (current) {
+          const pId = getParentId(current);
+          if (pId) {
+            matchedIds.add(pId);
+            current = tasks.find(parent => parent.id == pId);
+          } else {
+            break;
+          }
+        }
+      }
+    });
+
+    finalOrderedTasks = orderedTasks.filter(t => matchedIds.has(t.id));
+  }
+
+  const ganttTasks = finalOrderedTasks.filter(t => t.plan_start_date && t.plan_end_date && !isTaskHidden(t)).map(t => {
     const pId = getParentId(t);
     const depsArray = t.linked_tasks || t.dependencies || [];
-    const isParent = tasks.some(child => getParentId(child) == t.id);
+    // Проверяем, есть ли у текущей задачи дети внутри ОТФИЛЬТРОВАННОГО списка
+    const isParent = finalOrderedTasks.some(child => getParentId(child) == t.id);
     return {
       start: new Date(t.plan_start_date), end: new Date(t.plan_end_date), name: t.title, id: t.id.toString(),
       type: isParent ? 'project' : 'task', project: pId ? pId.toString() : undefined,
@@ -247,10 +284,9 @@ function ProjectDetail() {
     };
   });
 
-  // === ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ РЕСАЙЗА ===
+  // === ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ РЕСАЙЗА И СКРОЛЛИНГА ===
   const startResizingColumn = (e) => {
     if (e.button !== 0) return;
-
     e.preventDefault();
     e.stopPropagation();
     isResizingColumn.current = true;
@@ -265,7 +301,6 @@ function ProjectDetail() {
 
   useEffect(() => {
     const handleMouseMove = (e) => {
-      // Изменение ширины без ограничений (min 100px)
       if (isResizingColumn.current) {
         e.preventDefault();
         const newWidth = Math.max(100, startWidth.current + (e.pageX - startX.current));
@@ -274,7 +309,6 @@ function ProjectDetail() {
         return;
       }
 
-      // Скроллинг Ганта
       if (!isDragging.current) return;
       e.preventDefault();
       if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft -= (e.pageX - lastX.current);
@@ -345,6 +379,7 @@ function ProjectDetail() {
         let depth = 0; let current = rt;
         while (current && current.project) { depth++; current = renderedTasks.find(t => t.id === current.project); }
         const isFolder = rt.type === 'project';
+        // Ищем оригинальную задачу для обработки клика
         const originalTask = tasks.find(t => t.id.toString() === rt.id);
         const isOverdue = originalTask && originalTask.plan_end_date < today && originalTask.status !== 'completed';
         return (
@@ -629,15 +664,46 @@ function ProjectDetail() {
 
           {currentView === 'gantt' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 flex-1 overflow-hidden flex flex-col relative">
-              <div className="mb-3 sm:mb-4 flex justify-end gap-2 overflow-x-auto pb-1">
-                <button onClick={() => setGanttZoom(ViewMode.Day)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Day ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Дни</button>
-                <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
-                <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
+
+              {/* === ФИЛЬТРЫ И КНОПКИ МАСШТАБА === */}
+              <div className="mb-3 sm:mb-4 flex flex-col lg:flex-row justify-between gap-3 overflow-x-auto pb-1">
+
+                <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+                  <input
+                    type="text"
+                    placeholder="🔍 Поиск по названию..."
+                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-full sm:w-64 outline-none focus:ring-2 focus:ring-blue-500"
+                    value={filterTaskName}
+                    onChange={(e) => setFilterTaskName(e.target.value)}
+                  />
+                  <div className="w-full sm:w-64">
+                    <Select
+                      options={userOptions}
+                      value={userOptions.find(o => o.value === filterAssignee) || null}
+                      onChange={(opt) => setFilterAssignee(opt ? opt.value : null)}
+                      placeholder="👤 Исполнитель..."
+                      isClearable
+                      styles={{
+                        control: (base) => ({ ...base, minHeight: '34px', height: '34px', borderRadius: '0.5rem' }),
+                        valueContainer: (base) => ({ ...base, padding: '0 8px' }),
+                        input: (base) => ({ ...base, margin: 0, padding: 0 }),
+                        menuPortal: base => ({ ...base, zIndex: 9999 })
+                      }}
+                      menuPortalTarget={document.body}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 shrink-0">
+                  <button onClick={() => setGanttZoom(ViewMode.Day)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Day ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Дни</button>
+                  <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
+                  <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
+                </div>
+
               </div>
+              {/* ================================ */}
 
-              {/* === НОВЫЙ ВНЕШНИЙ КОНТЕЙНЕР ДЛЯ ПОЛЗУНКА === */}
               <div className="flex-1 relative overflow-hidden flex flex-col rounded-md border border-gray-100">
-
                 <div className="flex-1 overflow-auto relative select-none" ref={ganttContainerRef} onPointerDownCapture={handleGanttPointerDown} onWheelCapture={handleGanttWheel}>
                   {ganttTasks.length > 0 ? (
                     <Gantt
@@ -650,10 +716,9 @@ function ProjectDetail() {
                       listCellWidth={listWidth}
                       locale="ru"
                     />
-                  ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
+                  ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи не найдены (или у них не указаны даты).</div>}
                 </div>
 
-                {/* ПОЛЗУНОК ВЫНЕСЕН НА ВЕРХНИЙ УРОВЕНЬ, ТЕПЕРЬ ОН НА ВСЮ ВЫСОТУ */}
                 {ganttTasks.length > 0 && (
                   <>
                     <div
