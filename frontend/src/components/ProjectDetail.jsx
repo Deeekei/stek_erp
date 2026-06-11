@@ -18,14 +18,14 @@ function ProjectDetail() {
   const lastY = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // === СТЕЙТЫ ДЛЯ ИЗМЕНЕНИЯ ШИРИНЫ (EXCEL-СТИЛЬ) ===
+  // === СТЕЙТЫ ДЛЯ ИЗМЕНЕНИЯ ШИРИНЫ ===
   const isResizingColumn = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
-  const currentDragWidth = useRef(0); // Отслеживает ширину в реальном времени при тяге
+  const currentDragWidth = useRef(0);
 
   const [listWidth, setListWidth] = useState(window.innerWidth < 768 ? 180 : 380);
-  const [visualWidth, setVisualWidth] = useState(null); // Стейт для пунктирной линии
+  const [visualWidth, setVisualWidth] = useState(null);
 
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -249,6 +249,9 @@ function ProjectDetail() {
 
   // === ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ РЕСАЙЗА И СКРОЛЛИНГА ===
   const startResizingColumn = (e) => {
+    // ВАЖНО: Разрешаем только ЛЕВУЮ кнопку мыши (button === 0)
+    if (e.button !== 0) return;
+
     e.preventDefault();
     e.stopPropagation();
     isResizingColumn.current = true;
@@ -256,14 +259,14 @@ function ProjectDetail() {
     startWidth.current = listWidth;
     currentDragWidth.current = listWidth;
 
-    setVisualWidth(listWidth); // Показываем линию
+    setVisualWidth(listWidth); // Показываем пунктир
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   };
 
   useEffect(() => {
     const handleMouseMove = (e) => {
-      // 1. Изменяем положение визуальной пунктирной линии (без рендера самого Ганта)
+      // 1. Изменяем положение визуальной линии
       if (isResizingColumn.current) {
         e.preventDefault();
         const newWidth = Math.max(100, Math.min(800, startWidth.current + (e.pageX - startX.current)));
@@ -281,7 +284,7 @@ function ProjectDetail() {
     };
 
     const handleMouseUp = () => {
-      // Отпускаем ползунок ширины -> ФИКСИРУЕМ результат в таблицу
+      // Отпускаем ползунок ширины -> ФИКСИРУЕМ результат
       if (isResizingColumn.current) {
         isResizingColumn.current = false;
         setListWidth(currentDragWidth.current); // Сохраняем размер!
@@ -299,6 +302,7 @@ function ProjectDetail() {
       document.body.style.removeProperty('user-select');
     };
 
+    // Слушаем стандартные Mouse-события на весь экран для идеального отклика
     window.addEventListener('mousemove', handleMouseMove, { passive: false });
     window.addEventListener('mouseup', handleMouseUp);
     return () => {
@@ -313,8 +317,8 @@ function ProjectDetail() {
     if (!outerContainer) return;
     const innerScrollContainer = outerContainer.querySelector('svg')?.parentElement;
 
-    // ВАЖНО: Если мы кликнули по нашему ползунку (resizer-handle), игнорируем старт скроллинга Ганта!
     const className = (e.target.getAttribute('class') || '').toLowerCase();
+    // Если кликнули на ползунок ширины — игнорируем скроллинг Ганта
     if (className.includes('resizer-handle') || className.includes('bar') || className.includes('progress') || className.includes('wrapper') || className.includes('handle') || className.includes('arrow') || e.target.tagName?.toLowerCase() === 'button') return;
 
     isDragging.current = true; lastX.current = e.pageX; lastY.current = e.pageY;
@@ -649,9 +653,9 @@ function ProjectDetail() {
                       locale="ru"
                     />
 
-                    {/* ПОЛЗУНОК ЗАХВАТА */}
+                    {/* ПОЛЗУНОК ЗАХВАТА (onMouseDown вместо onPointerDown) */}
                     <div
-                      onPointerDown={startResizingColumn}
+                      onMouseDown={startResizingColumn}
                       className="resizer-handle absolute top-0 bottom-0 z-20 w-4 cursor-col-resize flex justify-center group"
                       style={{ left: listWidth - 2 }}
                       title="Потяните, чтобы изменить ширину"
