@@ -247,9 +247,8 @@ function ProjectDetail() {
     };
   });
 
-  // === ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ РЕСАЙЗА И СКРОЛЛИНГА ===
+  // === ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ РЕСАЙЗА ===
   const startResizingColumn = (e) => {
-    // ВАЖНО: Разрешаем только ЛЕВУЮ кнопку мыши (button === 0)
     if (e.button !== 0) return;
 
     e.preventDefault();
@@ -259,23 +258,23 @@ function ProjectDetail() {
     startWidth.current = listWidth;
     currentDragWidth.current = listWidth;
 
-    setVisualWidth(listWidth); // Показываем пунктир
+    setVisualWidth(listWidth);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   };
 
   useEffect(() => {
     const handleMouseMove = (e) => {
-      // 1. Изменяем положение визуальной линии
+      // Изменение ширины без ограничений (min 100px)
       if (isResizingColumn.current) {
         e.preventDefault();
-        const newWidth = Math.max(100, Math.min(800, startWidth.current + (e.pageX - startX.current)));
+        const newWidth = Math.max(100, startWidth.current + (e.pageX - startX.current));
         currentDragWidth.current = newWidth;
         setVisualWidth(newWidth);
         return;
       }
 
-      // 2. Скроллинг Ганта
+      // Скроллинг Ганта
       if (!isDragging.current) return;
       e.preventDefault();
       if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft -= (e.pageX - lastX.current);
@@ -284,14 +283,12 @@ function ProjectDetail() {
     };
 
     const handleMouseUp = () => {
-      // Отпускаем ползунок ширины -> ФИКСИРУЕМ результат
       if (isResizingColumn.current) {
         isResizingColumn.current = false;
-        setListWidth(currentDragWidth.current); // Сохраняем размер!
-        setVisualWidth(null); // Прячем пунктирную линию
+        setListWidth(currentDragWidth.current);
+        setVisualWidth(null);
       }
 
-      // Отпускаем скроллинг
       if (isDragging.current) {
         isDragging.current = false;
         if (scrollContainerRef.current) scrollContainerRef.current.style.cursor = 'grab';
@@ -302,7 +299,6 @@ function ProjectDetail() {
       document.body.style.removeProperty('user-select');
     };
 
-    // Слушаем стандартные Mouse-события на весь экран для идеального отклика
     window.addEventListener('mousemove', handleMouseMove, { passive: false });
     window.addEventListener('mouseup', handleMouseUp);
     return () => {
@@ -318,7 +314,6 @@ function ProjectDetail() {
     const innerScrollContainer = outerContainer.querySelector('svg')?.parentElement;
 
     const className = (e.target.getAttribute('class') || '').toLowerCase();
-    // Если кликнули на ползунок ширины — игнорируем скроллинг Ганта
     if (className.includes('resizer-handle') || className.includes('bar') || className.includes('progress') || className.includes('wrapper') || className.includes('handle') || className.includes('arrow') || e.target.tagName?.toLowerCase() === 'button') return;
 
     isDragging.current = true; lastX.current = e.pageX; lastY.current = e.pageY;
@@ -639,9 +634,12 @@ function ProjectDetail() {
                 <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
                 <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
               </div>
-              <div className="flex-1 overflow-auto relative select-none" ref={ganttContainerRef} onPointerDownCapture={handleGanttPointerDown} onWheelCapture={handleGanttWheel}>
-                {ganttTasks.length > 0 ? (
-                  <>
+
+              {/* === НОВЫЙ ВНЕШНИЙ КОНТЕЙНЕР ДЛЯ ПОЛЗУНКА === */}
+              <div className="flex-1 relative overflow-hidden flex flex-col rounded-md border border-gray-100">
+
+                <div className="flex-1 overflow-auto relative select-none" ref={ganttContainerRef} onPointerDownCapture={handleGanttPointerDown} onWheelCapture={handleGanttWheel}>
+                  {ganttTasks.length > 0 ? (
                     <Gantt
                       tasks={ganttTasks}
                       viewMode={ganttZoom}
@@ -652,8 +650,12 @@ function ProjectDetail() {
                       listCellWidth={listWidth}
                       locale="ru"
                     />
+                  ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
+                </div>
 
-                    {/* ПОЛЗУНОК ЗАХВАТА (onMouseDown вместо onPointerDown) */}
+                {/* ПОЛЗУНОК ВЫНЕСЕН НА ВЕРХНИЙ УРОВЕНЬ, ТЕПЕРЬ ОН НА ВСЮ ВЫСОТУ */}
+                {ganttTasks.length > 0 && (
+                  <>
                     <div
                       onMouseDown={startResizingColumn}
                       className="resizer-handle absolute top-0 bottom-0 z-20 w-4 cursor-col-resize flex justify-center group"
@@ -663,7 +665,6 @@ function ProjectDetail() {
                       <div className="resizer-handle w-[2px] h-full bg-transparent group-hover:bg-blue-400 transition-colors" />
                     </div>
 
-                    {/* ПУНКТИРНАЯ ЛИНИЯ (Появляется только во время перетаскивания) */}
                     {visualWidth !== null && (
                       <div
                         className="absolute top-0 bottom-0 z-30 border-l-2 border-dashed border-blue-500 pointer-events-none"
@@ -671,7 +672,8 @@ function ProjectDetail() {
                       />
                     )}
                   </>
-                ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
+                )}
+
               </div>
             </div>
           )}
