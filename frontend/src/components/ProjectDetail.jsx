@@ -12,17 +12,20 @@ function ProjectDetail() {
   const fileInputRef = useRef(null);
   const ganttContainerRef = useRef(null);
 
-  // Стейты для перемещения по Ганту
+  // Стейты для перемещения (скроллинга) по Ганту
   const isDragging = useRef(false);
   const lastX = useRef(0);
   const lastY = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // === НОВЫЕ СТЕЙТЫ ДЛЯ ИЗМЕНЕНИЯ ШИРИНЫ КОЛОНКИ ГАНТА ===
+  // === СТЕЙТЫ ДЛЯ ИЗМЕНЕНИЯ ШИРИНЫ (EXCEL-СТИЛЬ) ===
   const isResizingColumn = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  const currentDragWidth = useRef(0); // Отслеживает ширину в реальном времени при тяге
+
   const [listWidth, setListWidth] = useState(window.innerWidth < 768 ? 180 : 380);
+  const [visualWidth, setVisualWidth] = useState(null); // Стейт для пунктирной линии
 
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -251,18 +254,21 @@ function ProjectDetail() {
     isResizingColumn.current = true;
     startX.current = e.pageX;
     startWidth.current = listWidth;
+    currentDragWidth.current = listWidth;
 
+    setVisualWidth(listWidth); // Показываем линию
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   };
 
   useEffect(() => {
     const handleMouseMove = (e) => {
-      // 1. Изменение ширины колонки
+      // 1. Изменяем положение визуальной пунктирной линии (без рендера самого Ганта)
       if (isResizingColumn.current) {
         e.preventDefault();
         const newWidth = Math.max(100, Math.min(800, startWidth.current + (e.pageX - startX.current)));
-        setListWidth(newWidth);
+        currentDragWidth.current = newWidth;
+        setVisualWidth(newWidth);
         return;
       }
 
@@ -275,19 +281,21 @@ function ProjectDetail() {
     };
 
     const handleMouseUp = () => {
-      // Отпускаем ресайзер
+      // Отпускаем ползунок ширины -> ФИКСИРУЕМ результат в таблицу
       if (isResizingColumn.current) {
         isResizingColumn.current = false;
-        document.body.style.removeProperty('cursor');
-        document.body.style.removeProperty('user-select');
-        return;
+        setListWidth(currentDragWidth.current); // Сохраняем размер!
+        setVisualWidth(null); // Прячем пунктирную линию
       }
 
       // Отпускаем скроллинг
-      if (!isDragging.current) return;
-      isDragging.current = false;
-      if (scrollContainerRef.current) scrollContainerRef.current.style.cursor = 'grab';
-      if (ganttContainerRef.current) ganttContainerRef.current.style.cursor = 'grab';
+      if (isDragging.current) {
+        isDragging.current = false;
+        if (scrollContainerRef.current) scrollContainerRef.current.style.cursor = 'grab';
+        if (ganttContainerRef.current) ganttContainerRef.current.style.cursor = 'grab';
+      }
+
+      document.body.style.removeProperty('cursor');
       document.body.style.removeProperty('user-select');
     };
 
@@ -304,8 +312,11 @@ function ProjectDetail() {
     const outerContainer = ganttContainerRef.current;
     if (!outerContainer) return;
     const innerScrollContainer = outerContainer.querySelector('svg')?.parentElement;
+
+    // ВАЖНО: Если мы кликнули по нашему ползунку (resizer-handle), игнорируем старт скроллинга Ганта!
     const className = (e.target.getAttribute('class') || '').toLowerCase();
-    if (className.includes('bar') || className.includes('progress') || className.includes('wrapper') || className.includes('handle') || className.includes('arrow') || e.target.tagName?.toLowerCase() === 'button') return;
+    if (className.includes('resizer-handle') || className.includes('bar') || className.includes('progress') || className.includes('wrapper') || className.includes('handle') || className.includes('arrow') || e.target.tagName?.toLowerCase() === 'button') return;
+
     isDragging.current = true; lastX.current = e.pageX; lastY.current = e.pageY;
     scrollContainerRef.current = innerScrollContainer;
     outerContainer.style.cursor = 'grabbing';
@@ -638,13 +649,23 @@ function ProjectDetail() {
                       locale="ru"
                     />
 
-                    {/* НОВЫЙ ПОЛЗУНОК ДЛЯ ИЗМЕНЕНИЯ ШИРИНЫ */}
+                    {/* ПОЛЗУНОК ЗАХВАТА */}
                     <div
                       onPointerDown={startResizingColumn}
-                      className="absolute top-0 bottom-0 z-10 w-2 sm:w-3 cursor-col-resize hover:bg-blue-500/50 transition-colors"
-                      style={{ left: listWidth - 1 }}
+                      className="resizer-handle absolute top-0 bottom-0 z-20 w-4 cursor-col-resize flex justify-center group"
+                      style={{ left: listWidth - 2 }}
                       title="Потяните, чтобы изменить ширину"
-                    />
+                    >
+                      <div className="resizer-handle w-[2px] h-full bg-transparent group-hover:bg-blue-400 transition-colors" />
+                    </div>
+
+                    {/* ПУНКТИРНАЯ ЛИНИЯ (Появляется только во время перетаскивания) */}
+                    {visualWidth !== null && (
+                      <div
+                        className="absolute top-0 bottom-0 z-30 border-l-2 border-dashed border-blue-500 pointer-events-none"
+                        style={{ left: visualWidth }}
+                      />
+                    )}
                   </>
                 ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи без указанных дат не отображаются в Ганте.</div>}
               </div>
