@@ -9,7 +9,7 @@ function Dashboard() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // --- НОВЫЕ СТЕЙТЫ ДЛЯ ОТЧЕТОВ ---
+  // Стейты для отчетов
   const [reportUserId, setReportUserId] = useState(null);
   const [reportProjectId, setReportProjectId] = useState(null);
 
@@ -135,7 +135,7 @@ function Dashboard() {
     }
   };
 
-  // === НОВЫЕ ФУНКЦИИ ДЛЯ ВЫГРУЗКИ EXCEL ===
+  // ФУНКЦИИ ВЫГРУЗКИ EXCEL
   const handleDownloadEmployeeReport = async () => {
     if (!reportUserId) return alert("Пожалуйста, выберите сотрудника!");
     try {
@@ -169,7 +169,6 @@ function Dashboard() {
       alert("Ошибка при выгрузке отчета по проекту.");
     }
   };
-  // ========================================
 
   const handleCreateNews = async (e) => {
     e.preventDefault();
@@ -340,6 +339,30 @@ function Dashboard() {
     { name: 'Завершены', value: metrics.completed, color: '#16a34a' }
   ].filter(item => item.value > 0);
 
+  // === ПРОВЕРКА РОЛЕЙ ДЛЯ ОТЧЕТОВ ===
+  const isBoss = currentUser && ['admin', 'director'].includes(currentUser.role);
+  const isManager = currentUser && currentUser.role === 'manager';
+  const canSeeReports = isBoss || isManager || currentUser?.is_superuser;
+
+  // Фильтруем проекты: Босс видит все. Менеджер видит только те, где он Owner или Manager.
+  const reportProjectOptions = projects
+    .filter(p => isBoss || p.manager === currentUser?.id || p.owner === currentUser?.id)
+    .map(p => ({ value: p.id, label: p.title }));
+
+  // Фильтруем юзеров: Босс видит всех. Менеджер видит только людей из своего отдела.
+  const reportUserOptions = users
+    .filter(u => {
+      if (isBoss || currentUser?.is_superuser) return true;
+      if (isManager) {
+        return u.department === currentUser?.department;
+      }
+      return false;
+    })
+    .map(u => {
+      const fullName = `${u.first_name || ''} ${u.last_name || ''}`.trim();
+      return { value: u.id, label: fullName || u.username || `Сотрудник №${u.id}` };
+    });
+
   if (loading) return <div className="p-4 sm:p-12 text-center text-gray-500 font-medium">Сборка дашборда...</div>;
 
   return (
@@ -353,7 +376,7 @@ function Dashboard() {
       </div>
 
       {/* === БЛОК ОТЧЕТОВ ДЛЯ РУКОВОДСТВА === */}
-      {isFullAccess && (
+      {canSeeReports && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-6 sm:mb-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">📊 Аналитика и выгрузки</h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -363,9 +386,10 @@ function Dashboard() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1">
                   <Select
-                    options={userOptions}
+                    options={reportUserOptions}
                     onChange={(opt) => setReportUserId(opt ? opt.value : null)}
-                    placeholder="Выберите сотрудника..."
+                    placeholder={reportUserOptions.length > 0 ? "Выберите сотрудника..." : "В вашем отделе нет сотрудников"}
+                    isDisabled={reportUserOptions.length === 0}
                     isClearable
                     styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
                     menuPosition="fixed"
@@ -373,7 +397,8 @@ function Dashboard() {
                 </div>
                 <button
                   onClick={handleDownloadEmployeeReport}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap"
+                  disabled={reportUserOptions.length === 0 || !reportUserId}
+                  className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap"
                 >
                   📥 В Excel
                 </button>
@@ -385,9 +410,10 @@ function Dashboard() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1">
                   <Select
-                    options={projectOptions}
+                    options={reportProjectOptions}
                     onChange={(opt) => setReportProjectId(opt ? opt.value : null)}
-                    placeholder="Выберите проект..."
+                    placeholder={reportProjectOptions.length > 0 ? "Выберите проект..." : "У вас нет доступных проектов"}
+                    isDisabled={reportProjectOptions.length === 0}
                     isClearable
                     styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
                     menuPosition="fixed"
@@ -395,7 +421,8 @@ function Dashboard() {
                 </div>
                 <button
                   onClick={handleDownloadProjectReport}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap"
+                  disabled={reportProjectOptions.length === 0 || !reportProjectId}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap"
                 >
                   📥 В Excel
                 </button>
