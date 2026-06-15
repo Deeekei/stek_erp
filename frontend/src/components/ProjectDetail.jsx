@@ -63,7 +63,7 @@ function ProjectDetail() {
   const [newTaskParent, setNewTaskParent] = useState('');
   const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]);
   const [newTaskFiles, setNewTaskFiles] = useState([]);
-  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false); // НОВЫЙ СТЕЙТ ВЕХИ
+  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false); // Стейт вехи
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -177,22 +177,17 @@ function ProjectDetail() {
 
   const handleExportExcel = async () => {
     try {
-      const response = await api.get(`projects/${id}/export_excel/`, {
-        responseType: 'blob',
-      });
-
+      const response = await api.get(`projects/${id}/export_excel/`, { responseType: 'blob' });
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', `Проект_${project.title || id}_Задачи.xlsx`);
-
       document.body.appendChild(link);
       link.click();
-
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      alert("Не удалось выгрузить проект в Excel. Попробуйте позже.");
+      alert("Не удалось выгрузить проект в Excel.");
     }
   };
 
@@ -240,32 +235,24 @@ function ProjectDetail() {
     return { backgroundColor: isParent ? theme.prog : theme.bg, backgroundSelectedColor: isParent ? theme.progSel : theme.bgSel, progressColor: theme.prog, progressSelectedColor: theme.progSel };
   };
 
-  // Логика фильтрации задач
+  // Логика фильтрации
   let finalOrderedTasks = orderedTasks;
   if (filterTaskName || filterAssignee) {
     const matchedIds = new Set();
-
     tasks.forEach(t => {
       const matchName = t.title.toLowerCase().includes(filterTaskName.toLowerCase());
       const tAssigneeId = t.assignee && typeof t.assignee === 'object' ? t.assignee.id : t.assignee;
       const matchAssignee = filterAssignee ? tAssigneeId === filterAssignee : true;
-
       if (matchName && matchAssignee) {
         matchedIds.add(t.id);
-
         let current = t;
         while (current) {
           const pId = getParentId(current);
-          if (pId) {
-            matchedIds.add(pId);
-            current = tasks.find(parent => parent.id == pId);
-          } else {
-            break;
-          }
+          if (pId) { matchedIds.add(pId); current = tasks.find(parent => parent.id == pId); }
+          else { break; }
         }
       }
     });
-
     finalOrderedTasks = orderedTasks.filter(t => matchedIds.has(t.id));
   }
 
@@ -273,18 +260,12 @@ function ProjectDetail() {
     const pId = getParentId(t);
     const depsArray = t.linked_tasks || t.dependencies || [];
     const isParent = finalOrderedTasks.some(child => getParentId(child) == t.id);
-
-    // ВЫЧИСЛЯЕМ ТИП ДЛЯ ГАНТА: Папка, Веха или Обычная задача
     let taskType = 'task';
-    if (isParent) {
-      taskType = 'project';
-    } else if (t.is_milestone) {
-      taskType = 'milestone';
-    }
+    if (isParent) taskType = 'project';
+    else if (t.is_milestone) taskType = 'milestone';
 
     return {
       start: new Date(t.plan_start_date),
-      // Если это веха, дата старта и окончания должны совпадать
       end: t.is_milestone ? new Date(t.plan_start_date) : new Date(t.plan_end_date),
       name: t.title,
       id: t.id.toString(),
@@ -297,19 +278,11 @@ function ProjectDetail() {
     };
   });
 
-  // Обработчики событий для ресайза и скроллинга
   const startResizingColumn = (e) => {
     if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    isResizingColumn.current = true;
-    startX.current = e.pageX;
-    startWidth.current = listWidth;
-    currentDragWidth.current = listWidth;
-
-    setVisualWidth(listWidth);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
+    e.preventDefault(); e.stopPropagation();
+    isResizingColumn.current = true; startX.current = e.pageX; startWidth.current = listWidth; currentDragWidth.current = listWidth;
+    setVisualWidth(listWidth); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
   };
 
   useEffect(() => {
@@ -317,41 +290,26 @@ function ProjectDetail() {
       if (isResizingColumn.current) {
         e.preventDefault();
         const newWidth = Math.max(100, startWidth.current + (e.pageX - startX.current));
-        currentDragWidth.current = newWidth;
-        setVisualWidth(newWidth);
-        return;
+        currentDragWidth.current = newWidth; setVisualWidth(newWidth); return;
       }
-
       if (!isDragging.current) return;
       e.preventDefault();
       if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft -= (e.pageX - lastX.current);
       if (ganttContainerRef.current) ganttContainerRef.current.scrollTop -= (e.pageY - lastY.current);
       lastX.current = e.pageX; lastY.current = e.pageY;
     };
-
     const handleMouseUp = () => {
-      if (isResizingColumn.current) {
-        isResizingColumn.current = false;
-        setListWidth(currentDragWidth.current);
-        setVisualWidth(null);
-      }
-
+      if (isResizingColumn.current) { isResizingColumn.current = false; setListWidth(currentDragWidth.current); setVisualWidth(null); }
       if (isDragging.current) {
         isDragging.current = false;
         if (scrollContainerRef.current) scrollContainerRef.current.style.cursor = 'grab';
         if (ganttContainerRef.current) ganttContainerRef.current.style.cursor = 'grab';
       }
-
-      document.body.style.removeProperty('cursor');
-      document.body.style.removeProperty('user-select');
+      document.body.style.removeProperty('cursor'); document.body.style.removeProperty('user-select');
     };
-
     window.addEventListener('mousemove', handleMouseMove, { passive: false });
     window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
+    return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
   }, []);
 
   const handleGanttPointerDown = (e) => {
@@ -359,7 +317,6 @@ function ProjectDetail() {
     const outerContainer = ganttContainerRef.current;
     if (!outerContainer) return;
     const innerScrollContainer = outerContainer.querySelector('svg')?.parentElement;
-
     const className = (e.target.getAttribute('class') || '').toLowerCase();
     if (className.includes('resizer-handle') || className.includes('bar') || className.includes('progress') || className.includes('wrapper') || className.includes('handle') || className.includes('arrow') || e.target.tagName?.toLowerCase() === 'button') return;
 
@@ -375,10 +332,7 @@ function ProjectDetail() {
     if (e.deltaY !== 0 && e.shiftKey) {
       const svg = ganttContainerRef.current?.querySelector('svg');
       const innerScrollContainer = svg?.parentElement;
-      if (innerScrollContainer) {
-        e.preventDefault();
-        innerScrollContainer.scrollLeft += e.deltaY;
-      }
+      if (innerScrollContainer) { e.preventDefault(); innerScrollContainer.scrollLeft += e.deltaY; }
     }
   };
 
@@ -398,12 +352,7 @@ function ProjectDetail() {
           <div key={rt.id} className={`flex items-center border-b border-gray-100 px-2 group transition-colors ${isOverdue ? 'bg-red-50/70 hover:bg-red-100/70' : 'bg-white hover:bg-gray-50'}`} style={{ height: rowHeight }}>
             <div style={{ paddingLeft: `${depth * 15}px` }} className="flex items-center flex-1 overflow-hidden truncate">
               {isFolder ? <button onClick={() => onExpanderClick(rt)} className="mr-1 text-gray-400 hover:text-gray-800 focus:outline-none w-4 shrink-0">{rt.hideChildren ? '▶' : '▼'}</button> : <span className="w-5 shrink-0 inline-block"></span>}
-
-              {/* ОТОБРАЖЕНИЕ ИКОНКИ: Папка, Веха или Задача */}
-              <span className="mr-1 sm:mr-2 text-base shrink-0">
-                {isFolder ? '📁' : originalTask?.is_milestone ? '🚩' : '📄'}
-              </span>
-
+              <span className="mr-1 sm:mr-2 text-base shrink-0">{isFolder ? '📁' : originalTask?.is_milestone ? '🚩' : '📄'}</span>
               <span className={`truncate cursor-pointer hover:text-blue-600 transition-colors text-xs sm:text-[13px] ${isFolder ? 'font-bold text-gray-900' : isOverdue ? 'text-red-700 font-medium' : 'font-medium text-gray-700'}`} onClick={() => originalTask && handleTaskClick(originalTask)} title={rt.name}>{rt.name}</span>
             </div>
             {isFullAccess && (
@@ -441,11 +390,9 @@ function ProjectDetail() {
     const isParticipant = (task.participants || []).includes(currentUser?.id);
 
     if (!isBoss && !isWorker && !isParticipant) return alert("Нет прав для действия.");
-
     if (isParticipant && !isWorker && !isBoss) {
       setTasks(prev => prev.filter(t => t.id !== taskId));
-      try { await api.post(`tasks/${taskId}/hide/`); }
-      catch (error) { fetchTasks(); }
+      try { await api.post(`tasks/${taskId}/hide/`); } catch (error) { fetchTasks(); }
       return;
     }
 
@@ -468,8 +415,7 @@ function ProjectDetail() {
       const response = await api.patch(`tasks/${taskToComplete.id}/`, payload);
       setTasks(prevTasks => prevTasks.map(t => t.id === taskToComplete.id ? response.data : t));
       setTaskToComplete(null); setCompletionDelayReason('');
-    }
-    catch (error) { fetchTasks(); }
+    } catch (error) { fetchTasks(); }
   };
 
   const handleCreateTask = async (e) => {
@@ -482,9 +428,8 @@ function ProjectDetail() {
       project: parseInt(id), plan_start_date: newTaskPlanStart, plan_end_date: newTaskPlanEnd,
       assignee: newTaskAssignee, participants: newTaskParticipants,
       parent_task: newTaskParent ? parseInt(newTaskParent) : null,
-      linked_tasks: newTaskLinkedTasks,
-      dependencies: newTaskLinkedTasks,
-      is_milestone: newTaskIsMilestone // ПЕРЕДАЕМ ФЛАГ ВЕХИ
+      linked_tasks: newTaskLinkedTasks, dependencies: newTaskLinkedTasks,
+      is_milestone: newTaskIsMilestone
     };
 
     try {
@@ -501,11 +446,8 @@ function ProjectDetail() {
       }
       setTasks(prevTasks => [...prevTasks, createdTask]);
       setIsTaskModalOpen(false);
-
-      // Сброс стейтов
       setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd('');
-      setNewTaskAssignee(null); setNewTaskParticipants([]); setNewTaskParent(''); setNewTaskLinkedTasks([]);
-      setNewTaskFiles([]); setNewTaskIsMilestone(false);
+      setNewTaskAssignee(null); setNewTaskParticipants([]); setNewTaskParent(''); setNewTaskLinkedTasks([]); setNewTaskFiles([]); setNewTaskIsMilestone(false);
     } catch (error) { alert(`Ошибка: ${JSON.stringify(error.response?.data)}`); }
   };
 
@@ -517,7 +459,7 @@ function ProjectDetail() {
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
       plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, participants: task.participants || [], priority: task.priority || 'medium',
       linked_tasks: task.linked_tasks || task.dependencies || [],
-      is_milestone: task.is_milestone || false // ПОДГРУЖАЕМ ФЛАГ ВЕХИ
+      is_milestone: task.is_milestone || false
     });
     setNewCommentText(''); setIsEditModalOpen(true);
   };
@@ -534,15 +476,10 @@ function ProjectDetail() {
       setTaskToComplete(editingTask); setCompletionDelayReason(editingTask.delay_reason || ''); setIsCompletionModalOpen(true); setIsEditModalOpen(false); return;
     }
     try {
-      const payloadToUpdate = {
-        ...editFormData,
-        dependencies: editFormData.linked_tasks
-      };
-
+      const payloadToUpdate = { ...editFormData, dependencies: editFormData.linked_tasks };
       const response = await api.patch(`tasks/${editingTask.id}/`, payloadToUpdate);
       setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
-      setIsEditModalOpen(false);
-      setEditingTask(null);
+      setIsEditModalOpen(false); setEditingTask(null);
     } catch (error) { alert("Ошибка сохранения"); }
   };
 
@@ -690,7 +627,6 @@ function ProjectDetail() {
 
           {currentView === 'gantt' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 flex-1 overflow-hidden flex flex-col relative">
-
               <div className="mb-3 sm:mb-4 flex flex-col lg:flex-row justify-between gap-3 overflow-x-auto pb-1">
                 <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
                   <input
@@ -760,7 +696,6 @@ function ProjectDetail() {
                     )}
                   </>
                 )}
-
               </div>
             </div>
           )}
@@ -782,77 +717,72 @@ function ProjectDetail() {
       {/* === ЕДИНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] h-[90vh] flex flex-col overflow-hidden">
-            <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1200px] h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
               {canEditAll ? (
                 <>
-                  <div className="w-full md:w-2/3 flex flex-col bg-white border-r border-gray-200 min-h-0">
-                    <div className="flex-1 overflow-y-auto p-6 md:p-8">
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
-                          <span className="text-xs font-bold px-2 py-1 bg-blue-100 text-blue-800 rounded uppercase tracking-wide">📁 Проект: {taskProject?.title || editingTask.project}</span>
-                        </div>
-                        <button onClick={() => handleQuickDelete(editingTask.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap ml-3">Удалить</button>
+                  <div className="w-full md:w-2/3 p-6 md:p-8 overflow-y-auto border-r border-gray-200 bg-white">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
+                      </div>
+                      <button onClick={() => handleQuickDelete(editingTask.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap">Удалить</button>
+                    </div>
+
+                    <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
+                      <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
+
+                      {/* ЧЕКБОКС ВЕХИ ПРИ РЕДАКТИРОВАНИИ */}
+                      <div className="flex items-center mb-4">
+                        <input
+                          type="checkbox"
+                          id="pd_is_milestone_edit"
+                          checked={editFormData.is_milestone || false}
+                          onChange={(e) => setEditFormData({...editFormData, is_milestone: e.target.checked})}
+                          className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                        />
+                        <label htmlFor="pd_is_milestone_edit" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
+                          🚩 Отметить как веху
+                        </label>
                       </div>
 
-                      <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
-                        <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
-
-                        {/* ЧЕКБОКС ВЕХИ ПРИ РЕДАКТИРОВАНИИ */}
-                        <div className="flex items-center mb-4">
-                          <input
-                            type="checkbox"
-                            id="is_milestone_edit"
-                            checked={editFormData.is_milestone || false}
-                            onChange={(e) => setEditFormData({...editFormData, is_milestone: e.target.checked})}
-                            className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                          />
-                          <label htmlFor="is_milestone_edit" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
-                            🚩 Отметить как веху (Milestone)
-                          </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                        <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                        <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Связанные задачи</label><Select isMulti options={taskSelectOptions.filter(opt => opt.value !== editingTask.id)} value={taskSelectOptions.filter(opt => (editFormData.linked_tasks || []).includes(opt.value))} onChange={(selected) => setEditFormData({...editFormData, linked_tasks: selected ? selected.map(s => s.value) : []})} placeholder="Добавить связь..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label>
+                          <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
                         </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="sm:col-span-2">
-                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Проект</label>
-                            <Select options={projectOptions} value={projectOptions.find(o => o.value == editFormData.project) || null} onChange={(opt) => setEditFormData({...editFormData, project: opt ? opt.value : null})} placeholder="Выбрать проект..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
-                          </div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                          <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label>
-                            <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label>
-                            <select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select>
-                          </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label>
+                          <select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Начало *</label><input type="date" value={editFormData.plan_start_date || ''} onChange={e => setEditFormData({...editFormData, plan_start_date: e.target.value})} className="w-full border p-2 rounded" /></div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Дедлайн *</label><input type="date" value={editFormData.plan_end_date || ''} onChange={e => setEditFormData({...editFormData, plan_end_date: e.target.value})} className="w-full border p-2 rounded" /></div>
-                        </div>
-                        <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Описание</label><textarea value={editFormData.description || ''} onChange={e => setEditFormData({...editFormData, description: e.target.value})} className="w-full p-2 border rounded min-h-[100px] break-words" /></div>
-                      </form>
-
-                      <div className="pt-4 mt-6 border-t border-gray-200">
-                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📎 Прикрепленные файлы</h4>
-                        <div className="flex flex-wrap gap-2 mb-3">
-                          {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
-                            <div key={att.id} className="relative text-xs bg-white border border-gray-200 px-3 py-2 rounded-lg flex flex-col shadow-sm group hover:border-blue-300 transition-colors">
-                              {canInteract && <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>}
-                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words"><span className="mr-2 text-base">📄</span> <span className="truncate">{att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}</span></a>
-                            </div>
-                          )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
-                        </div>
-                        {canInteract && <input type="file" onChange={handleFileUpload} className="text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer w-full" />}
                       </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Начало *</label><input type="date" value={editFormData.plan_start_date || ''} onChange={e => setEditFormData({...editFormData, plan_start_date: e.target.value})} className="w-full border p-2 rounded" /></div>
+                        <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Дедлайн *</label><input type="date" value={editFormData.plan_end_date || ''} onChange={e => setEditFormData({...editFormData, plan_end_date: e.target.value})} className="w-full border p-2 rounded" /></div>
+                      </div>
+                      <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Описание</label><textarea value={editFormData.description || ''} onChange={e => setEditFormData({...editFormData, description: e.target.value})} className="w-full p-2 border rounded min-h-[100px] break-words" /></div>
+                    </form>
+
+                    <div className="pt-4 mt-6 border-t border-gray-200">
+                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📎 Прикрепленные файлы</h4>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
+                          <div key={att.id} className="relative text-xs bg-white border border-gray-200 px-3 py-2 rounded-lg flex flex-col shadow-sm min-w-[120px] max-w-xs group hover:border-blue-300 transition-colors">
+                            {canInteract && <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10" title="Удалить">✕</button>}
+                            <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 mb-1 hover:text-blue-600 truncate break-words"><span className="mr-2 text-base">📄</span> <span className="truncate">{att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл ${att.id}`}</span></a>
+                          </div>
+                        )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
+                      </div>
+                      {canInteract && <input type="file" onChange={handleFileUpload} className="text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer w-full" />}
                     </div>
                   </div>
-                  <div className="w-full md:w-1/3 flex flex-col bg-slate-50 min-h-0">
-                    <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200"><h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4></div>
-                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+
+                  <div className="w-full md:w-1/3 flex flex-col bg-slate-50 p-6 md:p-8">
+                    <h4 className="text-lg font-extrabold text-gray-800 mb-4 flex-shrink-0 flex items-center gap-2">💬 Чат</h4>
+                    <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
                           const isMe = currentUser && c.author_name && (
@@ -871,12 +801,10 @@ function ProjectDetail() {
                       ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
                     </div>
                     {canInteract && (
-                      <div className="p-4 bg-white border-t border-gray-200 flex-shrink-0">
-                        <div className="bg-slate-50 p-2 rounded-xl border border-gray-200 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
-                          <textarea value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Написать..." className="w-full text-sm outline-none resize-none min-h-[60px] break-words bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddComment(e); }} />
-                          <div className="flex justify-between items-center mt-2 border-t border-gray-100 pt-2">
-                            <button onClick={handleAddComment} className="bg-blue-600 text-white px-5 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 w-full sm:w-auto">Отправить</button>
-                          </div>
+                      <div className="flex-shrink-0 bg-white p-2 rounded-xl border border-gray-200 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                        <textarea value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Написать..." className="w-full text-sm outline-none resize-none min-h-[60px] break-words bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddComment(e); }} />
+                        <div className="flex justify-between items-center mt-2 border-t border-gray-100 pt-2">
+                          <button onClick={handleAddComment} className="bg-blue-600 text-white px-5 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 w-full sm:w-auto">Отправить</button>
                         </div>
                       </div>
                     )}
@@ -884,21 +812,22 @@ function ProjectDetail() {
                 </>
               ) : (
                 <>
-                  <div className="w-full md:w-2/3 flex flex-col bg-slate-50 border-r border-gray-200 min-h-0 order-2 md:order-1">
-                    <div className="p-6 md:px-8 pb-4 flex-shrink-0 border-b border-gray-200 bg-white">
-                      <div className="flex items-center gap-2 mb-4">
-                        <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
+                  <div className="w-full md:w-2/3 flex flex-col bg-slate-50 border-r border-gray-200 p-6 md:p-8 order-2 md:order-1">
+                    <div className="flex justify-between items-start mb-4 flex-shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold px-2 py-1 bg-white border border-gray-200 text-gray-500 rounded">#{editingTask.id}</span>
                         <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wide ${isWorkerTask ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
                           {isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}
                         </span>
                       </div>
-                      <h2 className="text-2xl font-extrabold text-gray-900 leading-tight break-words">
-                        {editingTask.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
-                        {editingTask.title}
-                      </h2>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
+                    <h2 className="text-2xl font-extrabold text-gray-900 mb-6 flex-shrink-0 leading-tight break-words">
+                      {editingTask.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
+                      {editingTask.title}
+                    </h2>
+
+                    <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
                           const isMe = currentUser && c.author_name && (
@@ -918,19 +847,17 @@ function ProjectDetail() {
                     </div>
 
                     {canInteract && (
-                      <div className="p-6 bg-white border-t border-gray-200 flex-shrink-0">
-                        <div className="bg-slate-50 p-3 rounded-xl border border-gray-200 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
-                          <textarea value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Написать сообщение участникам..." className="w-full text-sm outline-none resize-none min-h-[60px] break-words bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddComment(e); }} />
-                          <div className="flex justify-between items-center mt-2 border-t border-gray-100 pt-3">
-                            <span className="text-xs text-gray-400 hidden sm:inline font-medium">Ctrl + Enter для отправки</span>
-                            <button onClick={handleAddComment} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 shadow-sm w-full sm:w-auto">Отправить</button>
-                          </div>
+                      <div className="flex-shrink-0 bg-white p-3 rounded-xl border border-gray-200 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                        <textarea value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Написать сообщение участникам..." className="w-full text-sm outline-none resize-none min-h-[60px] break-words bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddComment(e); }} />
+                        <div className="flex justify-between items-center mt-2 border-t border-gray-100 pt-3">
+                          <span className="text-xs text-gray-400 hidden sm:inline font-medium">Ctrl + Enter для отправки</span>
+                          <button onClick={handleAddComment} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 shadow-sm w-full sm:w-auto">Отправить</button>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  <div className="w-full md:w-1/3 p-6 md:p-8 overflow-y-auto bg-white flex flex-col order-1 md:order-2 min-h-0">
+                  <div className="w-full md:w-1/3 p-6 md:p-8 overflow-y-auto bg-white flex flex-col order-1 md:order-2">
                     <div className={`mb-6 p-4 rounded-xl border ${isWorkerTask ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
                       <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Статус задачи</label>
                       {isWorkerTask ? (
@@ -961,7 +888,7 @@ function ProjectDetail() {
                       </div>
                       <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
                         <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span>
-                        <span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {taskProject?.title || editingTask.project}</Link></span>
+                        <span className="text-sm font-semibold text-blue-900 truncate block">📁 {project.title}</span>
                       </div>
                     </div>
 
@@ -1025,28 +952,14 @@ function ProjectDetail() {
                 <div className="sm:col-span-2 flex items-center mb-2">
                   <input
                     type="checkbox"
-                    id="is_milestone_new"
+                    id="pd_is_milestone_new"
                     checked={newTaskIsMilestone}
                     onChange={(e) => setNewTaskIsMilestone(e.target.checked)}
                     className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                   />
-                  <label htmlFor="is_milestone_new" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
+                  <label htmlFor="pd_is_milestone_new" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
                     🚩 Отметить как веху (Milestone)
                   </label>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Проект *</label>
-                  <Select
-                    options={projects.filter(p => isFullAccess || p.owner === currentUser?.id || p.manager === currentUser?.id || (p.visibility === 'selected' && p.allowed_users?.includes(currentUser?.id))).map(p => ({ value: p.id, label: p.title }))}
-                    value={projectOptions.find(o => o.value == newTaskProject) || null}
-                    onChange={(opt) => setNewTaskProject(opt ? opt.value : null)}
-                    placeholder="Поиск проекта..."
-                    isSearchable
-                    menuPosition="fixed"
-                    styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
-                    noOptionsMessage={() => "Нет доступных проектов"}
-                  />
                 </div>
 
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>

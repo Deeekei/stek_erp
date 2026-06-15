@@ -575,7 +575,7 @@ function Dashboard() {
                             className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                           />
                           <label htmlFor="dash_is_milestone_edit" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
-                            🚩 Отметить как веху (Milestone)
+                            🚩 Отметить как веху
                           </label>
                         </div>
 
@@ -797,7 +797,7 @@ function Dashboard() {
                     className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                   />
                   <label htmlFor="dash_is_milestone_new" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
-                    🚩 Отметить как веху (Milestone)
+                    🚩 Отметить как веху
                   </label>
                 </div>
 
