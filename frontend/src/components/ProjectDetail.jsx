@@ -63,7 +63,7 @@ function ProjectDetail() {
   const [newTaskParent, setNewTaskParent] = useState('');
   const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]);
   const [newTaskFiles, setNewTaskFiles] = useState([]);
-  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false); // Стейт вехи
+  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false); // СТЕЙТ ВЕХИ
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -260,6 +260,7 @@ function ProjectDetail() {
     const pId = getParentId(t);
     const depsArray = t.linked_tasks || t.dependencies || [];
     const isParent = finalOrderedTasks.some(child => getParentId(child) == t.id);
+
     let taskType = 'task';
     if (isParent) taskType = 'project';
     else if (t.is_milestone) taskType = 'milestone';
@@ -725,6 +726,7 @@ function ProjectDetail() {
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
+                        <span className="text-xs font-bold px-2 py-1 bg-blue-100 text-blue-800 rounded uppercase tracking-wide">📁 Проект: {project?.title}</span>
                       </div>
                       <button onClick={() => handleQuickDelete(editingTask.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap">Удалить</button>
                     </div>
@@ -742,7 +744,7 @@ function ProjectDetail() {
                           className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                         />
                         <label htmlFor="pd_is_milestone_edit" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
-                          🚩 Отметить как веху
+                          🚩 Отметить как веху (Milestone)
                         </label>
                       </div>
 
@@ -885,10 +887,6 @@ function ProjectDetail() {
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
-                      </div>
-                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                        <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span>
-                        <span className="text-sm font-semibold text-blue-900 truncate block">📁 {project.title}</span>
                       </div>
                     </div>
 
