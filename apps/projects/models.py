@@ -82,6 +82,10 @@ class Task(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата изменения")
     dependencies = models.ManyToManyField('self', symmetrical=False, blank=True, verbose_name="Влияет на задачи")
+    is_milestone = models.BooleanField(
+        default=False,
+        verbose_name="Это веха"
+    )
 
     hidden_for = models.ManyToManyField(
         User,
