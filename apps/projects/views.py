@@ -458,7 +458,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": f"Ошибка обработки CSV: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def toggle_pin(self, request, pk=None):
         project = self.get_object()
         user = request.user
