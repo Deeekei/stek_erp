@@ -36,7 +36,7 @@ function ProjectDetail() {
   // === СТЕЙТЫ ДЛЯ ФИЛЬТРОВ ===
   const [filterTaskName, setFilterTaskName] = useState('');
   const [filterAssignee, setFilterAssignee] = useState(null);
-  const [hideCompleted, setHideCompleted] = useState(false); // Новый стейт для скрытия
+  const [hideCompleted, setHideCompleted] = useState(false);
 
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -156,6 +156,16 @@ function ProjectDetail() {
     } catch (error) { alert("Не удалось удалить проект."); }
   };
 
+  // === ОБРАБОТЧИК ЗАКРЕПЛЕНИЯ ПРОЕКТА ===
+  const handleTogglePin = async () => {
+    try {
+      const response = await api.post(`projects/${id}/toggle_pin/`);
+      setProject(prev => ({ ...prev, is_pinned: response.data.is_pinned }));
+    } catch (error) {
+      alert("Не удалось изменить статус закрепления проекта");
+    }
+  };
+
   const handleImportFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -236,7 +246,6 @@ function ProjectDetail() {
     return { backgroundColor: isParent ? theme.prog : theme.bg, backgroundSelectedColor: isParent ? theme.progSel : theme.bgSel, progressColor: theme.prog, progressSelectedColor: theme.progSel };
   };
 
-  // === УМНАЯ ФИЛЬТРАЦИЯ ДЛЯ КАНБАНА ===
   const filteredTasksForBoard = useMemo(() => {
     return tasks.filter(t => {
       const matchName = t.title.toLowerCase().includes(filterTaskName.toLowerCase());
@@ -247,7 +256,6 @@ function ProjectDetail() {
     });
   }, [tasks, filterTaskName, filterAssignee, hideCompleted]);
 
-  // === УМНАЯ ФИЛЬТРАЦИЯ ДЛЯ ГАНТА ===
   let finalOrderedTasks = orderedTasks;
   if (filterTaskName || filterAssignee || hideCompleted) {
     const matchedIds = new Set();
@@ -531,7 +539,7 @@ function ProjectDetail() {
     try {
       await api.delete(`attachments/${attachmentId}/`);
       const updatedTask = { ...editingTask, attachments: editingTask.attachments.filter(att => att.id !== attachmentId) };
-      setEditingTask(updatedTask); setTasks(prevTasks => prevTasks.map(t => t.id === attachmentId ? updatedTask : t));
+      setEditingTask(updatedTask); setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? updatedTask : t));
     } catch (error) { alert("Ошибка удаления."); }
   };
 
@@ -562,11 +570,24 @@ function ProjectDetail() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* === ВЕРХНЯЯ ШАПКА === */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-6 gap-4">
         <div>
           <div className="text-sm font-medium text-gray-500 mb-1"><Link to="/projects" className="hover:text-blue-600">Проекты</Link> <span className="mx-2">/</span> {project.title}</div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 break-words">{project.title}</h1>
+
+          {/* === НАЗВАНИЕ + КНОПКА ЗАКРЕПЛЕНИЯ === */}
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 break-words flex items-center gap-2">
+            {project.title}
+            <button
+              onClick={handleTogglePin}
+              className="text-xl p-1 rounded-lg hover:bg-gray-100 transition-all active:scale-95"
+              title={project.is_pinned ? "Открепить проект" : "Закрепить проект"}
+            >
+              <span className={project.is_pinned ? "opacity-100 drop-shadow-md" : "opacity-25 hover:opacity-60 transition-opacity"}>
+                📌
+              </span>
+            </button>
+          </h1>
+
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full lg:w-auto">
           <input type="file" accept=".xml,.csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
@@ -586,154 +607,140 @@ function ProjectDetail() {
         </div>
       </div>
 
-      {loadingTasks ? (
-        <div className="flex-1 flex items-center justify-center text-gray-400">Загружаем задачи...</div>
-      ) : (
-        <>
-          {/* === ОБЩАЯ ОБНОВЛЕННАЯ СТРОКА ФИЛЬТРОВ И МАСШТАБА === */}
-          <div className="mb-4 flex flex-col md:flex-row items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
-            <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto flex-1">
-              <input
-                type="text"
-                placeholder="🔍 Поиск по названию..."
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-full sm:w-64 outline-none focus:ring-2 focus:ring-blue-500"
-                value={filterTaskName}
-                onChange={(e) => setFilterTaskName(e.target.value)}
-              />
-              <div className="w-full sm:w-64">
-                <Select
-                  options={userOptions}
-                  value={userOptions.find(o => o.value === filterAssignee) || null}
-                  onChange={(opt) => setFilterAssignee(opt ? opt.value : null)}
-                  placeholder="👤 Исполнитель..."
-                  isClearable
-                  styles={{
-                    control: (base) => ({ ...base, minHeight: '34px', height: '34px', borderRadius: '0.5rem' }),
-                    valueContainer: (base) => ({ ...base, padding: '0 8px' }),
-                    input: (base) => ({ ...base, margin: 0, padding: 0 }),
-                    menuPortal: base => ({ ...base, zIndex: 9999 })
-                  }}
-                  menuPortalTarget={document.body}
-                />
-              </div>
+      <div className="mb-4 flex flex-col md:flex-row items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto flex-1">
+          <input
+            type="text"
+            placeholder="🔍 Поиск по названию..."
+            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-full sm:w-64 outline-none focus:ring-2 focus:ring-blue-500"
+            value={filterTaskName}
+            onChange={(e) => setFilterTaskName(e.target.value)}
+          />
+          <div className="w-full sm:w-64">
+            <Select
+              options={userOptions}
+              value={userOptions.find(o => o.value === filterAssignee) || null}
+              onChange={(opt) => setFilterAssignee(opt ? opt.value : null)}
+              placeholder="👤 Исполнитель..."
+              isClearable
+              styles={{
+                control: (base) => ({ ...base, minHeight: '34px', height: '34px', borderRadius: '0.5rem' }),
+                valueContainer: (base) => ({ ...base, padding: '0 8px' }),
+                input: (base) => ({ ...base, margin: 0, padding: 0 }),
+                menuPortal: base => ({ ...base, zIndex: 9999 })
+              }}
+              menuPortalTarget={document.body}
+            />
+          </div>
+          <label className="flex items-center text-sm font-bold text-gray-600 cursor-pointer select-none sm:ml-2 shrink-0 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors w-full sm:w-auto justify-center sm:justify-start">
+            <input
+              type="checkbox"
+              checked={hideCompleted}
+              onChange={(e) => setHideCompleted(e.target.checked)}
+              className="mr-2 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+            />
+            👁️ Скрыть завершенные
+          </label>
+        </div>
+        {currentView === 'gantt' && (
+          <div className="flex gap-1 shrink-0 w-full sm:w-auto justify-end">
+            <button onClick={() => setGanttZoom(ViewMode.Day)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Day ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Дни</button>
+            <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
+            <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
+          </div>
+        )}
+      </div>
 
-              {/* НОВАЯ КНОПКА СТАТУСА ВЫПОЛНЕННЫХ */}
-              <label className="flex items-center text-sm font-bold text-gray-600 cursor-pointer select-none sm:ml-2 shrink-0 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors w-full sm:w-auto justify-center sm:justify-start">
-                <input
-                  type="checkbox"
-                  checked={hideCompleted}
-                  onChange={(e) => setHideCompleted(e.target.checked)}
-                  className="mr-2 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+      {currentView === 'board' && (
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <div className="flex gap-6 overflow-x-auto pb-4 flex-1 items-start">
+            {kanbanColumns.map(column => {
+              const columnTasks = filteredTasksForBoard.filter(task => task.status === column.id);
+              return (
+                <div key={column.id} className={`flex flex-col flex-shrink-0 w-72 sm:w-80 rounded-xl border ${column.color} max-h-full`}>
+                  <div className="p-3 sm:p-4 font-bold text-gray-700 flex justify-between items-center border-b border-black/5">
+                    {column.title} <span className="bg-white/60 px-2 py-0.5 rounded text-sm text-gray-500">{columnTasks.length}</span>
+                  </div>
+                  <Droppable droppableId={column.id}>
+                    {(provided) => (
+                      <div ref={provided.innerRef} {...provided.droppableProps} className="p-2 sm:p-3 flex-1 overflow-y-auto min-h-[200px]">
+                        {columnTasks.map((task, index) => {
+                          const isOverdue = task.plan_end_date < today && task.status !== 'completed';
+                          return (
+                            <Draggable key={task.id.toString()} draggableId={task.id.toString()} index={index}>
+                              {(provided) => (
+                                <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} onClick={() => handleTaskClick(task)} className={`bg-white p-3 sm:p-4 mb-3 rounded-lg shadow-sm border ${isOverdue ? 'border-red-300 bg-red-50' : 'border-gray-100'} cursor-pointer hover:shadow-md transition-all`}>
+                                  <div className="flex justify-between items-start mb-2">
+                                    <div className="flex space-x-1">
+                                      <span className={`px-2 py-0.5 text-[10px] uppercase rounded ${task.priority === 'low' ? 'bg-green-100 text-green-700' : task.priority === 'high' ? 'bg-purple-100 text-purple-700 font-bold' : task.priority === 'critical' ? 'bg-red-100 text-red-700 font-bold' : 'bg-blue-100 text-blue-700'}`}>
+                                        {task.priority === 'low' ? '🟢' : task.priority === 'medium' ? '🔵' : task.priority === 'high' ? '🟣' : '🔴'}
+                                      </span>
+                                    </div>
+                                    <span className="text-gray-400 text-xs shrink-0 ml-2">#{task.id}</span>
+                                  </div>
+                                  <h4 className="font-semibold text-gray-800 text-sm mb-1 break-words">
+                                    {task.is_milestone && <span className="mr-1" title="Веха">🚩</span>}
+                                    {task.title}
+                                  </h4>
+                                  <div className="flex justify-between text-xs text-gray-500 font-medium mt-2">
+                                    <div className={isOverdue ? 'text-red-500 font-bold' : ''}>⏳ {task.plan_end_date}</div>
+                                    {task.comments?.length > 0 && <div>💬 {task.comments.length}</div>}
+                                  </div>
+                                </div>
+                              )}
+                            </Draggable>
+                          )
+                        })}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </div>
+              );
+            })}
+          </div>
+        </DragDropContext>
+      )}
+
+      {currentView === 'gantt' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 flex-1 overflow-hidden flex flex-col relative">
+          <div className="flex-1 relative overflow-hidden flex flex-col rounded-md border border-gray-100">
+            <div className="flex-1 overflow-auto relative select-none" ref={ganttContainerRef} onPointerDownCapture={handleGanttPointerDown} onWheelCapture={handleGanttWheel}>
+              {ganttTasks.length > 0 ? (
+                <Gantt
+                  tasks={ganttTasks}
+                  viewMode={ganttZoom}
+                  onDateChange={handleGanttDateChange}
+                  onExpanderClick={handleExpanderClick}
+                  TaskListHeader={CustomTaskListHeader}
+                  TaskListTable={CustomTaskListTable}
+                  listCellWidth={listWidth}
+                  locale="ru"
                 />
-                👁️ Скрыть завершенные
-              </label>
+              ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи не найдены (или у них не указаны даты).</div>}
             </div>
 
-            {/* Масштаб Ганта переехал сюда из глубин SVG */}
-            {currentView === 'gantt' && (
-              <div className="flex gap-1 shrink-0 w-full sm:w-auto justify-end">
-                <button onClick={() => setGanttZoom(ViewMode.Day)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Day ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Дни</button>
-                <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
-                <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
-              </div>
-            )}
-          </div>
-
-          {/* === КАНБАН-ДОСКА === */}
-          {currentView === 'board' && (
-            <DragDropContext onDragEnd={handleDragEnd}>
-              <div className="flex gap-6 overflow-x-auto pb-4 flex-1 items-start">
-                {kanbanColumns.map(column => {
-                  // Используем нашу новую измененную коллекцию с учетом скрытия выполненных
-                  const columnTasks = filteredTasksForBoard.filter(task => task.status === column.id);
-                  return (
-                    <div key={column.id} className={`flex flex-col flex-shrink-0 w-72 sm:w-80 rounded-xl border ${column.color} max-h-full`}>
-                      <div className="p-3 sm:p-4 font-bold text-gray-700 flex justify-between items-center border-b border-black/5">
-                        {column.title} <span className="bg-white/60 px-2 py-0.5 rounded text-sm text-gray-500">{columnTasks.length}</span>
-                      </div>
-                      <Droppable droppableId={column.id}>
-                        {(provided) => (
-                          <div ref={provided.innerRef} {...provided.droppableProps} className="p-2 sm:p-3 flex-1 overflow-y-auto min-h-[200px]">
-                            {columnTasks.map((task, index) => {
-                              const isOverdue = task.plan_end_date < today && task.status !== 'completed';
-                              return (
-                                <Draggable key={task.id.toString()} draggableId={task.id.toString()} index={index}>
-                                  {(provided) => (
-                                    <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} onClick={() => handleTaskClick(task)} className={`bg-white p-3 sm:p-4 mb-3 rounded-lg shadow-sm border ${isOverdue ? 'border-red-300 bg-red-50' : 'border-gray-100'} cursor-pointer hover:shadow-md transition-all`}>
-                                      <div className="flex justify-between items-start mb-2">
-                                        <div className="flex space-x-1">
-                                          <span className={`px-2 py-0.5 text-[10px] uppercase rounded ${task.priority === 'low' ? 'bg-green-100 text-green-700' : task.priority === 'high' ? 'bg-purple-100 text-purple-700 font-bold' : task.priority === 'critical' ? 'bg-red-100 text-red-700 font-bold' : 'bg-blue-100 text-blue-700'}`}>
-                                            {task.priority === 'low' ? '🟢' : task.priority === 'medium' ? '🔵' : task.priority === 'high' ? '🟣' : '🔴'}
-                                          </span>
-                                        </div>
-                                        <span className="text-gray-400 text-xs shrink-0 ml-2">#{task.id}</span>
-                                      </div>
-                                      <h4 className="font-semibold text-gray-800 text-sm mb-1 break-words">
-                                        {task.is_milestone && <span className="mr-1" title="Веха">🚩</span>}
-                                        {task.title}
-                                      </h4>
-                                      <div className="flex justify-between text-xs text-gray-500 font-medium mt-2">
-                                        <div className={isOverdue ? 'text-red-500 font-bold' : ''}>⏳ {task.plan_end_date}</div>
-                                        {task.comments?.length > 0 && <div>💬 {task.comments.length}</div>}
-                                      </div>
-                                    </div>
-                                  )}
-                                </Draggable>
-                              )
-                            })}
-                            {provided.placeholder}
-                          </div>
-                        )}
-                      </Droppable>
-                    </div>
-                  );
-                })}
-              </div>
-            </DragDropContext>
-          )}
-
-          {/* === ДИАГРАММА ГАНТА === */}
-          {currentView === 'gantt' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 flex-1 overflow-hidden flex flex-col relative">
-              <div className="flex-1 relative overflow-hidden flex flex-col rounded-md border border-gray-100">
-                <div className="flex-1 overflow-auto relative select-none" ref={ganttContainerRef} onPointerDownCapture={handleGanttPointerDown} onWheelCapture={handleGanttWheel}>
-                  {ganttTasks.length > 0 ? (
-                    <Gantt
-                      tasks={ganttTasks}
-                      viewMode={ganttZoom}
-                      onDateChange={handleGanttDateChange}
-                      onExpanderClick={handleExpanderClick}
-                      TaskListHeader={CustomTaskListHeader}
-                      TaskListTable={CustomTaskListTable}
-                      listCellWidth={listWidth}
-                      locale="ru"
-                    />
-                  ) : <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium">Задачи не найдены (или у них не указаны даты).</div>}
+            {ganttTasks.length > 0 && (
+              <>
+                <div
+                  onMouseDown={startResizingColumn}
+                  className="resizer-handle absolute top-0 bottom-0 z-20 w-4 cursor-col-resize flex justify-center group"
+                  style={{ left: listWidth - 2 }}
+                  title="Потяните, чтобы изменить ширину"
+                >
+                  <div className="resizer-handle w-[2px] h-full bg-transparent group-hover:bg-blue-400 transition-colors" />
                 </div>
 
-                {ganttTasks.length > 0 && (
-                  <>
-                    <div
-                      onMouseDown={startResizingColumn}
-                      className="resizer-handle absolute top-0 bottom-0 z-20 w-4 cursor-col-resize flex justify-center group"
-                      style={{ left: listWidth - 2 }}
-                      title="Потяните, чтобы изменить ширину"
-                    >
-                      <div className="resizer-handle w-[2px] h-full bg-transparent group-hover:bg-blue-400 transition-colors" />
-                    </div>
-
-                    {visualWidth !== null && (
-                      <div
-                        className="absolute top-0 bottom-0 z-30 border-l-2 border-dashed border-blue-500 pointer-events-none"
-                        style={{ left: visualWidth }}
-                      />
-                    )}
-                  </>
+                {visualWidth !== null && (
+                  <div
+                    className="absolute top-0 bottom-0 z-30 border-l-2 border-dashed border-blue-500 pointer-events-none"
+                    style={{ left: visualWidth }}
+                  />
                 )}
-              </div>
-            </div>
-          )}
-        </>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {isProjectEditModalOpen && (
@@ -748,7 +755,6 @@ function ProjectDetail() {
         </div>
       )}
 
-      {/* === ЕДИНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1200px] h-[90vh] flex flex-col overflow-hidden">
@@ -922,7 +928,7 @@ function ProjectDetail() {
                       </div>
                       <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
                         <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span>
-                        <span className="text-sm font-semibold text-blue-900 truncate block">📁 {project.title}</span>
+                        <span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {project?.title || editingTask.project}</Link></span>
                       </div>
                     </div>
 

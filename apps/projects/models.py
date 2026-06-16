@@ -40,6 +40,12 @@ class Project(models.Model):
     plan_start_date = models.DateField(null=True, blank=True, verbose_name="Планируемая дата начала")
     plan_end_date = models.DateField(null=True, blank=True, verbose_name="Планируемая дата окончания")
     is_archived = models.BooleanField(default=False, verbose_name="Архивный")
+    pinned_by = models.ManyToManyField(
+        User,
+        related_name='pinned_projects',
+        blank=True,
+        verbose_name="Закреплен пользователями"
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата изменения")
 

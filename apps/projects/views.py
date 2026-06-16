@@ -458,6 +458,20 @@ class ProjectViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": f"Ошибка обработки CSV: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=['post'])
+    def toggle_pin(self, request, pk=None):
+        project = self.get_object()
+        user = request.user
+
+        if project.pinned_by.filter(id=user.id).exists():
+            project.pinned_by.remove(user)
+            is_pinned = False
+        else:
+            project.pinned_by.add(user)
+            is_pinned = True
+
+        return Response({'is_pinned': is_pinned})
+
 
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
