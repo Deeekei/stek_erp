@@ -53,7 +53,7 @@ class TaskSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 class ProjectSerializer(serializers.ModelSerializer):
-    serializer = ProjectSerializer(projects, many=True, context={'request': request})
+    is_pinned = serializers.SerializerMethodField(read_only=True)
     class Meta:
         model = Project
         fields = '__all__'
