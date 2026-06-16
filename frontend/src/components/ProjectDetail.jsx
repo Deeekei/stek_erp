@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Gantt, ViewMode } from 'gantt-task-react';
@@ -33,9 +33,10 @@ function ProjectDetail() {
   const [loadingProject, setLoadingProject] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(true);
 
-  // Стейты для фильтров
+  // === СТЕЙТЫ ДЛЯ ФИЛЬТРОВ ===
   const [filterTaskName, setFilterTaskName] = useState('');
   const [filterAssignee, setFilterAssignee] = useState(null);
+  const [hideCompleted, setHideCompleted] = useState(false); // Новый стейт для скрытия
 
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -63,7 +64,7 @@ function ProjectDetail() {
   const [newTaskParent, setNewTaskParent] = useState('');
   const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]);
   const [newTaskFiles, setNewTaskFiles] = useState([]);
-  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false); // СТЕЙТ ВЕХИ
+  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -235,15 +236,28 @@ function ProjectDetail() {
     return { backgroundColor: isParent ? theme.prog : theme.bg, backgroundSelectedColor: isParent ? theme.progSel : theme.bgSel, progressColor: theme.prog, progressSelectedColor: theme.progSel };
   };
 
-  // Логика фильтрации
+  // === УМНАЯ ФИЛЬТРАЦИЯ ДЛЯ КАНБАНА ===
+  const filteredTasksForBoard = useMemo(() => {
+    return tasks.filter(t => {
+      const matchName = t.title.toLowerCase().includes(filterTaskName.toLowerCase());
+      const tAssigneeId = t.assignee && typeof t.assignee === 'object' ? t.assignee.id : t.assignee;
+      const matchAssignee = filterAssignee ? tAssigneeId === filterAssignee : true;
+      const matchCompleted = hideCompleted ? t.status !== 'completed' : true;
+      return matchName && matchAssignee && matchCompleted;
+    });
+  }, [tasks, filterTaskName, filterAssignee, hideCompleted]);
+
+  // === УМНАЯ ФИЛЬТРАЦИЯ ДЛЯ ГАНТА ===
   let finalOrderedTasks = orderedTasks;
-  if (filterTaskName || filterAssignee) {
+  if (filterTaskName || filterAssignee || hideCompleted) {
     const matchedIds = new Set();
     tasks.forEach(t => {
       const matchName = t.title.toLowerCase().includes(filterTaskName.toLowerCase());
       const tAssigneeId = t.assignee && typeof t.assignee === 'object' ? t.assignee.id : t.assignee;
       const matchAssignee = filterAssignee ? tAssigneeId === filterAssignee : true;
-      if (matchName && matchAssignee) {
+      const matchCompleted = hideCompleted ? t.status !== 'completed' : true;
+
+      if (matchName && matchAssignee && matchCompleted) {
         matchedIds.add(t.id);
         let current = t;
         while (current) {
@@ -517,7 +531,7 @@ function ProjectDetail() {
     try {
       await api.delete(`attachments/${attachmentId}/`);
       const updatedTask = { ...editingTask, attachments: editingTask.attachments.filter(att => att.id !== attachmentId) };
-      setEditingTask(updatedTask); setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? updatedTask : t));
+      setEditingTask(updatedTask); setTasks(prevTasks => prevTasks.map(t => t.id === attachmentId ? updatedTask : t));
     } catch (error) { alert("Ошибка удаления."); }
   };
 
@@ -548,6 +562,7 @@ function ProjectDetail() {
 
   return (
     <div className="h-full flex flex-col">
+      {/* === ВЕРХНЯЯ ШАПКА === */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-6 gap-4">
         <div>
           <div className="text-sm font-medium text-gray-500 mb-1"><Link to="/projects" className="hover:text-blue-600">Проекты</Link> <span className="mx-2">/</span> {project.title}</div>
@@ -575,11 +590,62 @@ function ProjectDetail() {
         <div className="flex-1 flex items-center justify-center text-gray-400">Загружаем задачи...</div>
       ) : (
         <>
+          {/* === ОБЩАЯ ОБНОВЛЕННАЯ СТРОКА ФИЛЬТРОВ И МАСШТАБА === */}
+          <div className="mb-4 flex flex-col md:flex-row items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+            <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto flex-1">
+              <input
+                type="text"
+                placeholder="🔍 Поиск по названию..."
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-full sm:w-64 outline-none focus:ring-2 focus:ring-blue-500"
+                value={filterTaskName}
+                onChange={(e) => setFilterTaskName(e.target.value)}
+              />
+              <div className="w-full sm:w-64">
+                <Select
+                  options={userOptions}
+                  value={userOptions.find(o => o.value === filterAssignee) || null}
+                  onChange={(opt) => setFilterAssignee(opt ? opt.value : null)}
+                  placeholder="👤 Исполнитель..."
+                  isClearable
+                  styles={{
+                    control: (base) => ({ ...base, minHeight: '34px', height: '34px', borderRadius: '0.5rem' }),
+                    valueContainer: (base) => ({ ...base, padding: '0 8px' }),
+                    input: (base) => ({ ...base, margin: 0, padding: 0 }),
+                    menuPortal: base => ({ ...base, zIndex: 9999 })
+                  }}
+                  menuPortalTarget={document.body}
+                />
+              </div>
+
+              {/* НОВАЯ КНОПКА СТАТУСА ВЫПОЛНЕННЫХ */}
+              <label className="flex items-center text-sm font-bold text-gray-600 cursor-pointer select-none sm:ml-2 shrink-0 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors w-full sm:w-auto justify-center sm:justify-start">
+                <input
+                  type="checkbox"
+                  checked={hideCompleted}
+                  onChange={(e) => setHideCompleted(e.target.checked)}
+                  className="mr-2 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                />
+                👁️ Скрыть завершенные
+              </label>
+            </div>
+
+            {/* Масштаб Ганта переехал сюда из глубин SVG */}
+            {currentView === 'gantt' && (
+              <div className="flex gap-1 shrink-0 w-full sm:w-auto justify-end">
+                <button onClick={() => setGanttZoom(ViewMode.Day)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Day ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Дни</button>
+                <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
+                <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
+              </div>
+            )}
+          </div>
+
+          {/* === КАНБАН-ДОСКА === */}
           {currentView === 'board' && (
             <DragDropContext onDragEnd={handleDragEnd}>
               <div className="flex gap-6 overflow-x-auto pb-4 flex-1 items-start">
                 {kanbanColumns.map(column => {
-                  const columnTasks = tasks.filter(task => task.status === column.id);
+                  // Используем нашу новую измененную коллекцию с учетом скрытия выполненных
+                  const columnTasks = filteredTasksForBoard.filter(task => task.status === column.id);
                   return (
                     <div key={column.id} className={`flex flex-col flex-shrink-0 w-72 sm:w-80 rounded-xl border ${column.color} max-h-full`}>
                       <div className="p-3 sm:p-4 font-bold text-gray-700 flex justify-between items-center border-b border-black/5">
@@ -626,42 +692,9 @@ function ProjectDetail() {
             </DragDropContext>
           )}
 
+          {/* === ДИАГРАММА ГАНТА === */}
           {currentView === 'gantt' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 flex-1 overflow-hidden flex flex-col relative">
-              <div className="mb-3 sm:mb-4 flex flex-col lg:flex-row justify-between gap-3 overflow-x-auto pb-1">
-                <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
-                  <input
-                    type="text"
-                    placeholder="🔍 Поиск по названию..."
-                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-full sm:w-64 outline-none focus:ring-2 focus:ring-blue-500"
-                    value={filterTaskName}
-                    onChange={(e) => setFilterTaskName(e.target.value)}
-                  />
-                  <div className="w-full sm:w-64">
-                    <Select
-                      options={userOptions}
-                      value={userOptions.find(o => o.value === filterAssignee) || null}
-                      onChange={(opt) => setFilterAssignee(opt ? opt.value : null)}
-                      placeholder="👤 Исполнитель..."
-                      isClearable
-                      styles={{
-                        control: (base) => ({ ...base, minHeight: '34px', height: '34px', borderRadius: '0.5rem' }),
-                        valueContainer: (base) => ({ ...base, padding: '0 8px' }),
-                        input: (base) => ({ ...base, margin: 0, padding: 0 }),
-                        menuPortal: base => ({ ...base, zIndex: 9999 })
-                      }}
-                      menuPortalTarget={document.body}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-2 shrink-0">
-                  <button onClick={() => setGanttZoom(ViewMode.Day)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Day ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Дни</button>
-                  <button onClick={() => setGanttZoom(ViewMode.Week)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Week ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Недели</button>
-                  <button onClick={() => setGanttZoom(ViewMode.Month)} className={`px-3 py-1 text-xs sm:text-sm rounded ${ganttZoom === ViewMode.Month ? 'bg-blue-100 text-blue-700 font-bold' : 'bg-gray-100 text-gray-600'}`}>Месяцы</button>
-                </div>
-              </div>
-
               <div className="flex-1 relative overflow-hidden flex flex-col rounded-md border border-gray-100">
                 <div className="flex-1 overflow-auto relative select-none" ref={ganttContainerRef} onPointerDownCapture={handleGanttPointerDown} onWheelCapture={handleGanttWheel}>
                   {ganttTasks.length > 0 ? (
@@ -734,7 +767,6 @@ function ProjectDetail() {
                     <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
                       <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
 
-                      {/* ЧЕКБОКС ВЕХИ ПРИ РЕДАКТИРОВАНИИ */}
                       <div className="flex items-center mb-4">
                         <input
                           type="checkbox"
@@ -888,6 +920,10 @@ function ProjectDetail() {
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
                       </div>
+                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                        <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span>
+                        <span className="text-sm font-semibold text-blue-900 truncate block">📁 {project.title}</span>
+                      </div>
                     </div>
 
                     <div className="mb-6 flex-1">
@@ -946,7 +982,6 @@ function ProjectDetail() {
                   <input type="text" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 break-words" required />
                 </div>
 
-                {/* ЧЕКБОКС ВЕХИ ПРИ СОЗДАНИИ */}
                 <div className="sm:col-span-2 flex items-center mb-2">
                   <input
                     type="checkbox"
