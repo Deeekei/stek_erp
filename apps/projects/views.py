@@ -1,5 +1,5 @@
 from rest_framework import viewsets, status
-from .models import Project, Task, Notification
+from .models import Project, Task, Notification, FCMDevice
 from .serializers import ProjectSerializer, TaskSerializer, CommentSerializer, NotificationSerializer
 from rest_framework.decorators import action
 from rest_framework.response import Response
