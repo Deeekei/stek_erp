@@ -57,13 +57,14 @@ def notify_user(user, title, message):
     # ==========================================
     # 3. ОТПРАВЛЯЕМ WEB PUSH ЧЕРЕЗ FIREBASE
     # ==========================================
+    print(f"\n[FCM DEBUG] Начинаем отправку для юзера: {user.username}", flush=True)
     try:
-        # Ищем все привязанные устройства пользователя
         devices = FCMDevice.objects.filter(user=user)
         tokens = [device.registration_id for device in devices]
 
+        print(f"[FCM DEBUG] Найдено токенов у {user.username}: {len(tokens)} шт. -> {tokens}", flush=True)
+
         if tokens:
-            # Формируем пуш-уведомление
             push_msg = messaging.MulticastMessage(
                 notification=messaging.Notification(
                     title=title,
@@ -71,11 +72,14 @@ def notify_user(user, title, message):
                 ),
                 tokens=tokens,
             )
-            # Отправляем через сервера Google
             response = messaging.send_each_for_multicast(push_msg)
-            print(f"Web Push для {user.username} отправлен: {response.success_count} доставлено, {response.failure_count} ошибок.")
+            print(f"[FCM DEBUG] РЕЗУЛЬТАТ: Успешно: {response.success_count}, Ошибок: {response.failure_count}",
+                  flush=True)
+        else:
+            print(f"[FCM DEBUG] Отмена: У {user.username} нет привязанных устройств в базе!", flush=True)
+
     except Exception as e:
-        print(f"Критическая ошибка при отправке Web Push: {e}")
+        print(f"[FCM DEBUG] КРИТИЧЕСКАЯ ОШИБКА: {e}", flush=True)
 
 class DashboardOverduePagination(PageNumberPagination):
     page_size = 10  # Ровно 10 задач на страницу
