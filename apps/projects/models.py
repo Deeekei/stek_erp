@@ -15,7 +15,6 @@ class Department(models.Model):
         return self.name
 
 
-
 class Project(models.Model):
     VISIBILITY_CHOICES = (
         ('all', 'Все'),
@@ -53,8 +52,8 @@ class Project(models.Model):
         verbose_name = "Проект"
         verbose_name_plural = "Проекты"
 
-        def __str__(self):
-            return self.title
+    def __str__(self):
+        return self.title
 
 
 class Task(models.Model):
@@ -136,6 +135,7 @@ class Attachment(models.Model):
     def __str__(self):
         return f"Файл{self.file.name} для задачи {self.task.title}"
 
+
 class News(models.Model):
     title = models.CharField(max_length=255, verbose_name="Заголовок")
     content = models.TextField(verbose_name="Текст новости")
@@ -146,6 +146,7 @@ class News(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
 
 class Notification(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', verbose_name='Кому')
@@ -161,3 +162,17 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Уведомление для {self.user.username}: {self.title}"
+
+
+# === НОВАЯ МОДЕЛЬ ДЛЯ ХРАНЕНИЯ ТОКЕНОВ ДЕВАЙСОВ (WEB PUSH) ===
+class FCMDevice(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='fcm_devices', verbose_name="Пользователь")
+    registration_id = models.CharField(max_length=255, unique=True, verbose_name="FCM Токен")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата привязки")
+
+    class Meta:
+        verbose_name = "FCM Устройство"
+        verbose_name_plural = "FCM Устройства"
+
+    def __str__(self):
+        return f"Устройство {self.user.username} (#{self.id})"

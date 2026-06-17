@@ -1,7 +1,8 @@
 """
 Django settings for Mini_ERP project.
 """
-
+import firebase_admin
+from firebase_admin import credentials
 from pathlib import Path
 import os
 import sys
@@ -158,3 +159,10 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
+
+
+FIREBASE_KEY_PATH = os.path.join(BASE_DIR, 'firebase-adminsdk.json')
+
+if not firebase_admin._apps:
+    cred = credentials.Certificate(FIREBASE_KEY_PATH)
+    firebase_admin.initialize_app(cred)

@@ -938,3 +938,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
     def mark_all_as_read(self, request):
         updated_count = self.get_queryset().filter(is_read=False).update(is_read=True)
         return Response({'status': f'{updated_count} уведомлений прочитано'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def save_fcm_token(self, request):
+        token = request.data.get('token')
+        if token:
+            # get_or_create предотвращает создание дубликатов, если токен уже есть
+            FCMDevice.objects.get_or_create(user=request.user, registration_id=token)
+            return Response({'status': 'Токен успешно сохранен'}, status=status.HTTP_200_OK)
+        return Response({'error': 'Токен не предоставлен'}, status=status.HTTP_400_BAD_REQUEST)
