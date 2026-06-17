@@ -18,6 +18,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions
 from .models import Attachment, News
 from .serializers import AttachmentSerializer, NewsSerializer
+from firebase_admin import messaging
 import xml.etree.ElementTree as ET
 import csv
 import io
