@@ -28,7 +28,6 @@ from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta, date
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import PermissionDenied
-from apps.projects.utils import notify_user
 
 
 User = get_user_model()
