@@ -36,25 +36,47 @@ User = get_user_model()
 
 def notify_user(user, title, message):
     """
-    Создает уведомление в БД и отправляет Email.
+    Создает уведомление в БД, отправляет Email и Web Push.
     """
     if not user:
         return
 
-    # 1. Создаем запись для интерфейса (колокольчика)
+    # 1. Создаем запись для интерфейса (внутрисистемный колокольчик)
     Notification.objects.create(
         user=user,
         title=title,
         message=message
     )
 
-    # 2. Отправляем письмо через Celery (теперь через реальный SMTP)
-    # Обязательно проверяем, что поле email заполнено
+    # 2. Отправляем письмо через Celery
     if getattr(user, 'email', None):
         try:
             send_notification_email.delay(user.email, title, message)
         except Exception as e:
             print(f"Ошибка отправки Email через Celery: {e}")
+
+    # ==========================================
+    # 3. ОТПРАВЛЯЕМ WEB PUSH ЧЕРЕЗ FIREBASE
+    # ==========================================
+    try:
+        # Ищем все привязанные устройства пользователя
+        devices = FCMDevice.objects.filter(user=user)
+        tokens = [device.registration_id for device in devices]
+
+        if tokens:
+            # Формируем пуш-уведомление
+            push_msg = messaging.MulticastMessage(
+                notification=messaging.Notification(
+                    title=title,
+                    body=message
+                ),
+                tokens=tokens,
+            )
+            # Отправляем через сервера Google
+            response = messaging.send_each_for_multicast(push_msg)
+            print(f"Web Push для {user.username} отправлен: {response.success_count} доставлено, {response.failure_count} ошибок.")
+    except Exception as e:
+        print(f"Критическая ошибка при отправке Web Push: {e}")
 
 class DashboardOverduePagination(PageNumberPagination):
     page_size = 10  # Ровно 10 задач на страницу
