@@ -147,7 +147,7 @@ EMAIL_USE_SSL = True
 EMAIL_USE_TLS = False
 
 EMAIL_HOST_USER = 'stroitekufa@yandex.com'
-EMAIL_HOST_PASSWORD = 'ghitglzwheiovpnq'
+EMAIL_HOST_PASSWORD = 'bpbmkmjsfgoasziv'
 
 
 DEFAULT_FROM_EMAIL = f'ERP <{EMAIL_HOST_USER}>'
