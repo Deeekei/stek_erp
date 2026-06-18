@@ -13,6 +13,9 @@ function MyTasks() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isFullAccess, setIsFullAccess] = useState(false);
 
+  // === СТЕЙТ ДЛЯ ФИЛЬТРА СОВЕРШЕННЫХ ЗАДАЧ ===
+  const [hideCompleted, setHideCompleted] = useState(false);
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [editFormData, setEditFormData] = useState({});
@@ -166,7 +169,8 @@ function MyTasks() {
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
       plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, participants: task.participants || [], priority: task.priority || 'medium',
-      project: task.project || null
+      project: task.project || null,
+      is_milestone: task.is_milestone || false
     });
     setNewCommentText('');
     setIsEditModalOpen(true);
@@ -283,9 +287,23 @@ function MyTasks() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">Мои задачи</h1>
-        <p className="text-sm text-gray-500 mt-1">Все задачи, в которых вы назначены ответственным или участником</p>
+      {/* === ВЕРХНЯЯ ШАПКА С КНОПКОЙ ФИЛЬТРА === */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-6 gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-800">Мои задачи</h1>
+          <p className="text-sm text-gray-500 mt-1">Все задачи, в которых вы назначены ответственным или участником</p>
+        </div>
+        <div className="flex items-center shrink-0">
+          <label className="flex items-center text-sm font-bold text-gray-600 cursor-pointer select-none bg-white hover:bg-gray-50 border border-gray-200 px-4 py-2 rounded-xl shadow-sm transition-colors w-full sm:w-auto justify-center sm:justify-start">
+            <input
+              type="checkbox"
+              checked={hideCompleted}
+              onChange={(e) => setHideCompleted(e.target.checked)}
+              className="mr-2 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+            />
+            👁️ Скрыть завершенные
+          </label>
+        </div>
       </div>
 
       <DragDropContext onDragEnd={handleDragEnd}>
@@ -294,8 +312,13 @@ function MyTasks() {
             const columnTasks = tasks.filter(task => {
               const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
               const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
-              return task.status === column.id && (taskAssigneeId == currentUser?.id || isParticipant);
+              const matchAssignee = taskAssigneeId == currentUser?.id || isParticipant;
+              // Умное скрытие выполненных
+              const matchCompleted = hideCompleted ? task.status !== 'completed' : true;
+
+              return task.status === column.id && matchAssignee && matchCompleted;
             });
+
             return (
               <div key={column.id} className={`flex flex-col flex-shrink-0 w-80 rounded-xl border ${column.color} max-h-full`}>
                 <div className="p-4 font-bold text-gray-700 flex justify-between items-center border-b border-black/5">
@@ -315,7 +338,10 @@ function MyTasks() {
                                   <span className={`px-2 py-0.5 text-[10px] uppercase rounded font-medium ${prioInfo.color}`}>{prioInfo.icon} {prioInfo.label}</span>
                                   <span className="text-gray-400 text-xs font-medium">#{task.id}</span>
                                 </div>
-                                <h4 className="font-semibold text-gray-800 text-sm mb-1 leading-snug break-words">{task.title}</h4>
+                                <h4 className="font-semibold text-gray-800 text-sm mb-1 leading-snug break-words">
+                                  {task.is_milestone && <span className="mr-1" title="Веха">🚩</span>}
+                                  {task.title}
+                                </h4>
                                 <div className="text-[11px] text-blue-600 font-medium mb-2 truncate">
                                   <Link to={`/projects/${task.project}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>📁 {task.project_title || `Проект #${task.project}`}</Link>
                                 </div>
@@ -338,6 +364,7 @@ function MyTasks() {
         </div>
       </DragDropContext>
 
+      {/* === МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] h-[90vh] flex flex-col overflow-hidden">
@@ -356,6 +383,21 @@ function MyTasks() {
 
                       <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
                         <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
+
+                        {/* ЧЕКБОКС ВЕХИ ПРИ РЕДАКТИРОВАНИИ */}
+                        <div className="flex items-center mb-4">
+                          <input
+                            type="checkbox"
+                            id="my_is_milestone_edit"
+                            checked={editFormData.is_milestone || false}
+                            onChange={(e) => setEditFormData({...editFormData, is_milestone: e.target.checked})}
+                            className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                          />
+                          <label htmlFor="my_is_milestone_edit" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
+                            🚩 Отметить как веху (Milestone)
+                          </label>
+                        </div>
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="sm:col-span-2">
                             <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Проект</label>
@@ -383,9 +425,9 @@ function MyTasks() {
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📎 Прикрепленные файлы</h4>
                         <div className="flex flex-wrap gap-2 mb-3">
                           {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
-                            <div key={att.id} className="relative text-xs bg-white border border-gray-200 px-3 py-2 rounded-lg flex flex-col shadow-sm min-w-[120px] max-w-xs group hover:border-blue-300 transition-colors">
-                              {canInteract && <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10" title="Удалить">✕</button>}
-                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 mb-1 hover:text-blue-600 truncate break-words"><span className="mr-2 text-base">📄</span> <span className="truncate">{att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл ${att.id}`}</span></a>
+                            <div key={att.id} className="relative text-xs bg-white border border-gray-200 px-3 py-2 rounded-lg flex flex-col shadow-sm group hover:border-blue-300 transition-colors">
+                              {canInteract && <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>}
+                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words"><span className="mr-2 text-base">📄</span> <span className="truncate">{att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл ${att.id}`}</span></a>
                             </div>
                           )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
                         </div>
@@ -435,7 +477,10 @@ function MyTasks() {
                           {isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}
                         </span>
                       </div>
-                      <h2 className="text-2xl font-extrabold text-gray-900 leading-tight break-words">{editingTask.title}</h2>
+                      <h2 className="text-2xl font-extrabold text-gray-900 leading-tight break-words">
+                        {editingTask.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
+                        {editingTask.title}
+                      </h2>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">

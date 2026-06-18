@@ -1,5 +1,5 @@
 from rest_framework import viewsets, status
-from .models import Project, Task, Notification
+from .models import Project, Task, Notification, FCMDevice
 from .serializers import ProjectSerializer, TaskSerializer, CommentSerializer, NotificationSerializer
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -18,6 +18,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions
 from .models import Attachment, News
 from .serializers import AttachmentSerializer, NewsSerializer
+from firebase_admin import messaging
 import xml.etree.ElementTree as ET
 import csv
 import io
@@ -28,7 +29,6 @@ from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta, date
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import PermissionDenied
-from apps.projects.utils import notify_user
 
 
 User = get_user_model()
@@ -36,25 +36,42 @@ User = get_user_model()
 
 def notify_user(user, title, message):
     """
-    Создает уведомление в БД и отправляет Email.
+    Создает уведомление в БД, отправляет Email и Web Push.
     """
     if not user:
         return
 
-    # 1. Создаем запись для интерфейса (колокольчика)
+    # 1. Создаем запись для интерфейса (колокольчик)
     Notification.objects.create(
         user=user,
         title=title,
         message=message
     )
 
-    # 2. Отправляем письмо через Celery (теперь через реальный SMTP)
-    # Обязательно проверяем, что поле email заполнено
+    # 2. Отправляем письмо через Celery
     if getattr(user, 'email', None):
         try:
             send_notification_email.delay(user.email, title, message)
-        except Exception as e:
-            print(f"Ошибка отправки Email через Celery: {e}")
+        except Exception:
+            pass
+
+    # 3. Отправляем Web Push через Firebase
+    try:
+        devices = FCMDevice.objects.filter(user=user)
+        tokens = [device.registration_id for device in devices]
+
+        if tokens:
+            push_msg = messaging.MulticastMessage(
+                notification=messaging.Notification(
+                    title=title,
+                    body=message
+                ),
+                tokens=tokens,
+            )
+            messaging.send_each_for_multicast(push_msg)
+    except Exception:
+        # Тихая обработка, чтобы не прерывать основной бизнес-процесс
+        pass
 
 class DashboardOverduePagination(PageNumberPagination):
     page_size = 10  # Ровно 10 задач на страницу
@@ -457,6 +474,20 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             return Response({"error": f"Ошибка обработки CSV: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def toggle_pin(self, request, pk=None):
+        project = self.get_object()
+        user = request.user
+
+        if project.pinned_by.filter(id=user.id).exists():
+            project.pinned_by.remove(user)
+            is_pinned = False
+        else:
+            project.pinned_by.add(user)
+            is_pinned = True
+
+        return Response({'is_pinned': is_pinned})
 
 
 class TaskViewSet(viewsets.ModelViewSet):
@@ -924,3 +955,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
     def mark_all_as_read(self, request):
         updated_count = self.get_queryset().filter(is_read=False).update(is_read=True)
         return Response({'status': f'{updated_count} уведомлений прочитано'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def save_fcm_token(self, request):
+        token = request.data.get('token')
+        if token:
+            # get_or_create предотвращает создание дубликатов, если токен уже есть
+            FCMDevice.objects.get_or_create(user=request.user, registration_id=token)
+            return Response({'status': 'Токен успешно сохранен'}, status=status.HTTP_200_OK)
+        return Response({'error': 'Токен не предоставлен'}, status=status.HTTP_400_BAD_REQUEST)

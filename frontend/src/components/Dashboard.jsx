@@ -9,7 +9,7 @@ function Dashboard() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // --- НОВЫЕ СТЕЙТЫ ДЛЯ ОТЧЕТОВ ---
+  // Стейты для отчетов
   const [reportUserId, setReportUserId] = useState(null);
   const [reportProjectId, setReportProjectId] = useState(null);
 
@@ -43,6 +43,7 @@ function Dashboard() {
   const [newTaskParticipants, setNewTaskParticipants] = useState([]);
   const [newTaskProject, setNewTaskProject] = useState(null);
   const [newTaskFiles, setNewTaskFiles] = useState([]);
+  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false); // Стейт для вехи
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -135,7 +136,6 @@ function Dashboard() {
     }
   };
 
-  // === НОВЫЕ ФУНКЦИИ ДЛЯ ВЫГРУЗКИ EXCEL ===
   const handleDownloadEmployeeReport = async () => {
     if (!reportUserId) return alert("Пожалуйста, выберите сотрудника!");
     try {
@@ -169,7 +169,6 @@ function Dashboard() {
       alert("Ошибка при выгрузке отчета по проекту.");
     }
   };
-  // ========================================
 
   const handleCreateNews = async (e) => {
     e.preventDefault();
@@ -202,7 +201,8 @@ function Dashboard() {
     if (!newTaskProject) return alert("Пожалуйста, выберите проект для задачи!");
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
-      project: parseInt(newTaskProject), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee, participants: newTaskParticipants
+      project: parseInt(newTaskProject), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee, participants: newTaskParticipants,
+      is_milestone: newTaskIsMilestone // Добавляем флаг вехи
     };
     if (newTaskPlanStart) payload.plan_start_date = newTaskPlanStart;
 
@@ -217,7 +217,7 @@ function Dashboard() {
       }
       fetchDashboardMetricsAndTasks(1);
       setIsTaskModalOpen(false);
-      setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd(''); setNewTaskAssignee(null); setNewTaskParticipants([]); setNewTaskProject(null); setNewTaskFiles([]);
+      setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd(''); setNewTaskAssignee(null); setNewTaskParticipants([]); setNewTaskProject(null); setNewTaskFiles([]); setNewTaskIsMilestone(false);
     } catch (error) { alert("Ошибка при создании задачи."); }
   };
 
@@ -227,7 +227,8 @@ function Dashboard() {
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
       plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium', participants: task.participants || [],
-      project: task.project || null
+      project: task.project || null,
+      is_milestone: task.is_milestone || false // Подгружаем флаг вехи
     });
     setNewCommentText('');
     setIsEditModalOpen(true);
@@ -340,6 +341,27 @@ function Dashboard() {
     { name: 'Завершены', value: metrics.completed, color: '#16a34a' }
   ].filter(item => item.value > 0);
 
+  const isBoss = currentUser && ['admin', 'director'].includes(currentUser.role);
+  const isManager = currentUser && currentUser.role === 'manager';
+  const canSeeReports = isBoss || isManager || currentUser?.is_superuser;
+
+  const reportProjectOptions = projects
+    .filter(p => isBoss || p.manager === currentUser?.id || p.owner === currentUser?.id)
+    .map(p => ({ value: p.id, label: p.title }));
+
+  const reportUserOptions = users
+    .filter(u => {
+      if (isBoss || currentUser?.is_superuser) return true;
+      if (isManager) {
+        return u.department === currentUser?.department;
+      }
+      return false;
+    })
+    .map(u => {
+      const fullName = `${u.first_name || ''} ${u.last_name || ''}`.trim();
+      return { value: u.id, label: fullName || u.username || `Сотрудник №${u.id}` };
+    });
+
   if (loading) return <div className="p-4 sm:p-12 text-center text-gray-500 font-medium">Сборка дашборда...</div>;
 
   return (
@@ -352,20 +374,19 @@ function Dashboard() {
         <button onClick={() => setIsTaskModalOpen(true)} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-semibold shadow-md transition-colors">+ Новая задача</button>
       </div>
 
-      {/* === БЛОК ОТЧЕТОВ ДЛЯ РУКОВОДСТВА === */}
-      {isFullAccess && (
+      {canSeeReports && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-6 sm:mb-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">📊 Аналитика и выгрузки</h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 shadow-inner">
               <label className="block text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">Успеваемость сотрудника</label>
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1">
                   <Select
-                    options={userOptions}
+                    options={reportUserOptions}
                     onChange={(opt) => setReportUserId(opt ? opt.value : null)}
-                    placeholder="Выберите сотрудника..."
+                    placeholder={reportUserOptions.length > 0 ? "Выберите сотрудника..." : "В вашем отделе нет сотрудников"}
+                    isDisabled={reportUserOptions.length === 0}
                     isClearable
                     styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
                     menuPosition="fixed"
@@ -373,7 +394,8 @@ function Dashboard() {
                 </div>
                 <button
                   onClick={handleDownloadEmployeeReport}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap"
+                  disabled={reportUserOptions.length === 0 || !reportUserId}
+                  className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap"
                 >
                   📥 В Excel
                 </button>
@@ -385,9 +407,10 @@ function Dashboard() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1">
                   <Select
-                    options={projectOptions}
+                    options={reportProjectOptions}
                     onChange={(opt) => setReportProjectId(opt ? opt.value : null)}
-                    placeholder="Выберите проект..."
+                    placeholder={reportProjectOptions.length > 0 ? "Выберите проект..." : "У вас нет доступных проектов"}
+                    isDisabled={reportProjectOptions.length === 0}
                     isClearable
                     styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
                     menuPosition="fixed"
@@ -395,17 +418,16 @@ function Dashboard() {
                 </div>
                 <button
                   onClick={handleDownloadProjectReport}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap"
+                  disabled={reportProjectOptions.length === 0 || !reportProjectId}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-5 py-2 rounded-lg font-bold shadow-sm transition-colors whitespace-nowrap"
                 >
                   📥 В Excel
                 </button>
               </div>
             </div>
-
           </div>
         </div>
       )}
-      {/* ==================================== */}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
         <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-300 flex items-center space-x-5 relative overflow-hidden"><div className="absolute top-0 right-0 w-2 h-full bg-slate-400"></div><div className="w-16 h-16 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">📋</div><div><p className="text-lg sm:text-2xl text-slate-600 font-extrabold">Всего задач</p><p className="text-4xl sm:text-3xl font-black text-slate-800 mt-1">{metrics.total}</p></div></div>
@@ -465,7 +487,10 @@ function Dashboard() {
                 overdueTasks.map(task => (
                   <div key={task.id} onClick={() => handleTaskClick(task)} className="p-3 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100/60 transition-all cursor-pointer flex justify-between items-start">
                     <div className="max-w-[70%]">
-                      <p className="text-sm font-semibold text-gray-800 leading-tight mb-1 truncate break-words">{task.title}</p>
+                      <p className="text-sm font-semibold text-gray-800 leading-tight mb-1 truncate break-words">
+                        {task.is_milestone && <span className="mr-1" title="Веха">🚩</span>}
+                        {task.title}
+                      </p>
                       <p className="text-[11px] text-blue-600 truncate break-words"><Link to={`/projects/${task.project}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>📁 Перейти в проект</Link></p>
                     </div>
                     <div className="text-right flex-shrink-0"><span className="text-[10px] bg-red-200 text-red-800 px-2 py-0.5 rounded font-bold">⏳ {task.plan_end_date}</span></div>
@@ -539,6 +564,21 @@ function Dashboard() {
 
                       <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
                         <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
+
+                        {/* ЧЕКБОКС ВЕХИ ПРИ РЕДАКТИРОВАНИИ */}
+                        <div className="flex items-center mb-4">
+                          <input
+                            type="checkbox"
+                            id="dash_is_milestone_edit"
+                            checked={editFormData.is_milestone || false}
+                            onChange={(e) => setEditFormData({...editFormData, is_milestone: e.target.checked})}
+                            className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                          />
+                          <label htmlFor="dash_is_milestone_edit" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
+                            🚩 Отметить как веху
+                          </label>
+                        </div>
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="sm:col-span-2">
                             <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Проект</label>
@@ -618,7 +658,10 @@ function Dashboard() {
                           {isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}
                         </span>
                       </div>
-                      <h2 className="text-2xl font-extrabold text-gray-900 leading-tight break-words">{editingTask.title}</h2>
+                      <h2 className="text-2xl font-extrabold text-gray-900 leading-tight break-words">
+                        {editingTask.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
+                        {editingTask.title}
+                      </h2>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
@@ -720,9 +763,21 @@ function Dashboard() {
         </div>
       )}
 
+      {isCompletionModalOpen && taskToComplete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
+          <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
+            <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
+            <form onSubmit={handleConfirmCompletion}>
+              <textarea value={completionDelayReason} onChange={(e) => setCompletionDelayReason(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words" placeholder="Укажите причину..." required />
+              <div className="flex justify-end gap-3"><button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* --- МОДАЛКА СОЗДАНИЯ ЗАДАЧИ --- */}
       {isTaskModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); } }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); setNewTaskIsMilestone(false); } }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">Новая задача</h3>
             <form onSubmit={handleCreateTask} className="space-y-4 sm:space-y-6">
@@ -730,6 +785,20 @@ function Dashboard() {
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Название *</label>
                   <input type="text" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 break-words" required />
+                </div>
+
+                {/* ЧЕКБОКС ВЕХИ ПРИ СОЗДАНИИ */}
+                <div className="sm:col-span-2 flex items-center mb-2">
+                  <input
+                    type="checkbox"
+                    id="dash_is_milestone_new"
+                    checked={newTaskIsMilestone}
+                    onChange={(e) => setNewTaskIsMilestone(e.target.checked)}
+                    className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                  />
+                  <label htmlFor="dash_is_milestone_new" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
+                    🚩 Отметить как веху
+                  </label>
                 </div>
 
                 <div>
@@ -746,26 +815,12 @@ function Dashboard() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label>
-                  <Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Поиск по ФИО..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Участники</label>
-                  <Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Поиск..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label>
-                  <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white">
-                    <option value="low">🟢 Низкая</option>
-                    <option value="medium">🔵 Средняя</option>
-                    <option value="high">🟣 Высокая</option>
-                    <option value="critical">🔴 Критичная</option>
-                  </select>
-                </div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label><select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-4 border border-gray-100">
-                <div><label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План)</label><input type="date" value={newTaskPlanStart} onChange={(e) => setNewTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" /></div>
+                <div><label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План) *</label><input type="date" value={newTaskPlanStart} onChange={(e) => setNewTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" /></div>
                 <div><label className="block text-xs font-bold text-gray-500 mb-1">Дедлайн *</label><input type="date" value={newTaskPlanEnd} onChange={(e) => setNewTaskPlanEnd(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" required /></div>
               </div>
               <div className="border border-dashed border-gray-300 p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors">
@@ -773,19 +828,7 @@ function Dashboard() {
                 {newTaskFiles.length > 0 && (<div className="mt-3 flex flex-wrap gap-2">{newTaskFiles.map((f, idx) => (<span key={idx} className="bg-white border border-gray-200 text-xs text-gray-600 px-2.5 py-1 rounded shadow-sm">📄 {f.name}</span>))}</div>)}
               </div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Описание</label><textarea value={newTaskDescription} onChange={(e) => setNewTaskDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg min-h-[80px] break-words"></textarea></div>
-              <div className="flex justify-end gap-3 pt-6 border-t border-gray-50"><button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); }} className="px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition-colors">Создать задачу</button></div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isCompletionModalOpen && taskToComplete && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
-          <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
-            <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
-            <form onSubmit={handleConfirmCompletion}>
-              <textarea value={completionDelayReason} onChange={(e) => setCompletionDelayReason(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words" placeholder="Укажите причину..." required />
-              <div className="flex justify-end gap-3"><button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button></div>
+              <div className="flex justify-end gap-3 pt-6 border-t border-gray-50"><button type="button" onClick={() => { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); setNewTaskIsMilestone(false); }} className="px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition-colors">Создать задачу</button></div>
             </form>
           </div>
         </div>

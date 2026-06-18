@@ -24,3 +24,5 @@ openpyxl
 
 # Работа с файлами (на случай, если есть картинки в Attachments)
 Pillow
+
+firebase-admin

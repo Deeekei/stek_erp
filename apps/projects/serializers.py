@@ -53,9 +53,17 @@ class TaskSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 class ProjectSerializer(serializers.ModelSerializer):
+    is_pinned = serializers.SerializerMethodField(read_only=True)
     class Meta:
         model = Project
         fields = '__all__'
+
+    def get_is_pinned(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            # Проверяем, есть ли текущий юзер в списке закрепивших
+            return obj.pinned_by.filter(id=request.user.id).exists()
+        return False
 
 
 

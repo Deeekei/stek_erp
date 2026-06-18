@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import Select from 'react-select';
 import api from '../api';
@@ -159,6 +159,17 @@ function Projects() {
     }
   };
 
+  // === ОБРАБОТЧИК ЗАКРЕПЛЕНИЯ ПРОЕКТА ===
+  const handleTogglePin = async (projectId) => {
+    try {
+      const response = await api.post(`projects/${projectId}/toggle_pin/`);
+      // Обновляем статус is_pinned у конкретного проекта
+      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, is_pinned: response.data.is_pinned } : p));
+    } catch (error) {
+      alert("Не удалось изменить статус закрепления проекта");
+    }
+  };
+
   const getVisibilityLabel = (vis) => {
     switch(vis) {
       case 'all': return '🌍 Все';
@@ -168,6 +179,14 @@ function Projects() {
       default: return '🌍 Все';
     }
   };
+
+  // === СОРТИРОВКА ПРОЕКТОВ (ЗАКРЕПЛЕННЫЕ НАВЕРХ) ===
+  const sortedProjects = useMemo(() => {
+    return [...projects].sort((a, b) => {
+      if (a.is_pinned === b.is_pinned) return 0;
+      return a.is_pinned ? -1 : 1;
+    });
+  }, [projects]);
 
   if (loadingProjects) {
     return (
@@ -201,10 +220,23 @@ function Projects() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map(project => (
-            <div key={project.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex flex-col hover:shadow-md transition-shadow">
+          {sortedProjects.map(project => (
+            <div key={project.id} className={`bg-white rounded-xl shadow-sm border p-6 flex flex-col hover:shadow-md transition-all ${project.is_pinned ? 'border-blue-300 shadow-blue-100/50' : 'border-gray-100'}`}>
               <div className="flex justify-between items-start mb-4">
-                <h3 className="text-xl font-bold text-gray-800 line-clamp-2" title={project.title}>{project.title}</h3>
+
+                {/* Кнопка булавки и Название проекта */}
+                <div className="flex items-start gap-2 overflow-hidden">
+                  <button
+                    onClick={(e) => { e.preventDefault(); handleTogglePin(project.id); }}
+                    className="text-xl mt-0.5 rounded-lg hover:bg-gray-100 transition-all active:scale-95 shrink-0"
+                    title={project.is_pinned ? "Открепить проект" : "Закрепить проект"}
+                  >
+                    <span className={project.is_pinned ? "opacity-100 drop-shadow-md" : "opacity-25 hover:opacity-60 transition-opacity"}>
+                      📌
+                    </span>
+                  </button>
+                  <h3 className="text-xl font-bold text-gray-800 line-clamp-2" title={project.title}>{project.title}</h3>
+                </div>
 
                 {canEditProject(project) && (
                   <div className="flex space-x-3 ml-4 shrink-0">
