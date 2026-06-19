@@ -11,18 +11,23 @@ function Login({ onLoginSuccess }) {
     setError('');       // Очищаем старые ошибки
 
     try {
-      // Стучимся в наш API за токеном
+      // Стучимся в наш API за токенами
       const response = await axios.post('/api/token/', {
         username,
         password,
       });
 
-      // Если всё успешно, берем токен и сохраняем его в память браузера
-      const token = response.data.access;
-      localStorage.setItem('token', token);
+      // === ИЗМЕНЕНИЯ ЗДЕСЬ ===
+      // Берем ОБА токена из ответа сервера
+      const accessToken = response.data.access;
+      const refreshToken = response.data.refresh;
+
+      // Сохраняем оба токена в память браузера
+      localStorage.setItem('token', accessToken);
+      localStorage.setItem('refresh_token', refreshToken);
 
       // Сообщаем главному приложению, что мы вошли
-      onLoginSuccess(token);
+      onLoginSuccess(accessToken);
     } catch (err) {
       setError('Неверный логин или пароль. Попробуйте снова.');
     }
