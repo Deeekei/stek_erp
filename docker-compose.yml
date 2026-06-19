@@ -55,13 +55,20 @@ services:
       - redis
 
   celery-beat:
-    build: ./backend
+    build: .
+    restart: always
     command: celery -A Mini_ERP beat -l info
     volumes:
-      - ./backend:/app
+      - media_volume:/app/media
+    environment:
+      - DB_HOST=db
+      - DB_NAME=erp_db
+      - DB_USER=erp_user
+      - DB_PASSWORD=my_super_secret_password
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
+      - backend
       - redis
-      - db
 
   frontend:
     # Фронтенд собирается из папки frontend
