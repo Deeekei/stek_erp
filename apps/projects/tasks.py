@@ -1,7 +1,6 @@
 from celery import shared_task
 from django.core.mail import send_mail
 from django.conf import settings
-from celery import shared_task
 from django.utils import timezone
 from datetime import timedelta
 from .models import Task
@@ -19,7 +18,7 @@ def send_notification_email(user_email, title, message):
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user_email],
-            fail_silently=False,  # Ошибка запишется в логи Celery, если Яндекс "упадет"
+            fail_silently=False,
         )
         return f"Email sent to {user_email}"
     except Exception as e:
@@ -32,26 +31,25 @@ def check_deadlines_and_notify():
     Ежедневная задача. Ищет задачи, до дедлайна которых осталось 10, 5 или 1 день.
     """
     from .views import notify_user
-    # 1. Получаем текущую дату сервера
+
     today = timezone.now().date()
 
-    # 2. Вычисляем контрольные даты
     date_in_10_days = today + timedelta(days=10)
     date_in_5_days = today + timedelta(days=5)
     date_in_1_days = today + timedelta(days=1)
 
-    # 3. Ищем все незавершенные задачи
     active_tasks = Task.objects.exclude(status='completed')
 
-    # 4. Проверяем каждую задачу
     for task in active_tasks:
-        # Пропускаем, если дата окончания не задана или нет исполнителя
         if not task.plan_end_date or not task.assignee:
             continue
 
         task_date = task.plan_end_date
-        task_url = f"https://erp.stekufa.ru/task/{task.id}"
-        # 5. Определяем, попадает ли дата в наши интервалы
+
+        # Разделяем на относительную ссылку (для React/Firebase) и абсолютную (для Email текста)
+        task_link = f"/task/{task.id}"
+        task_url = f"https://erp.stekufa.ru{task_link}"
+
         days_left = None
         if task_date == date_in_10_days:
             days_left = 10
@@ -60,12 +58,12 @@ def check_deadlines_and_notify():
         elif task_date == date_in_1_days:
             days_left = 1
 
-        # 6. Если совпадение найдено — отправляем уведомление
         if days_left:
             title = "⏳ Приближается дедлайн!"
             message = f"По задаче «{task.title}» истекает срок через {days_left} дн. (Дата: {task_date.strftime('%d.%m.%Y')})\nПерейти к задаче: {task_url}"
 
             try:
-                notify_user(task.assignee, title, message)
+                # ВАЖНО: Передаем параметр link=task_link, чтобы Firebase сделал пуш кликабельным!
+                notify_user(task.assignee, title, message, link=task_link)
             except Exception as e:
                 print(f"Ошибка при отправке авто-уведомления для задачи ID {task.id}: {e}")
