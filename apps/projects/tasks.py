@@ -50,7 +50,7 @@ def check_deadlines_and_notify():
             continue
 
         task_date = task.plan_end_date
-
+        task_url = f"https://erp.stekufa.ru/task/{task.id}"
         # 5. Определяем, попадает ли дата в наши интервалы
         days_left = None
         if task_date == date_in_10_days:
@@ -63,7 +63,7 @@ def check_deadlines_and_notify():
         # 6. Если совпадение найдено — отправляем уведомление
         if days_left:
             title = "⏳ Приближается дедлайн!"
-            message = f"По задаче «{task.title}» истекает срок через {days_left} дн. (Дата: {task_date.strftime('%d.%m.%Y')})"
+            message = f"По задаче «{task.title}» истекает срок через {days_left} дн. (Дата: {task_date.strftime('%d.%m.%Y')})\nПерейти к задаче: {task_url}"
 
             try:
                 notify_user(task.assignee, title, message)

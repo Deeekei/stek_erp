@@ -34,7 +34,7 @@ from rest_framework.exceptions import PermissionDenied
 User = get_user_model()
 
 
-def notify_user(user, title, message):
+def notify_user(user, title, message, link=None):
     """
     Создает уведомление в БД, отправляет Email и Web Push.
     """
@@ -61,16 +61,22 @@ def notify_user(user, title, message):
         tokens = [device.registration_id for device in devices]
 
         if tokens:
+            webpush_config = None
+            if link:
+                # Делаем ссылку абсолютной для ОС-пушей
+                full_url = f"https://erp.stekufa.ru{link}" if link.startswith('/') else link
+                webpush_config = messaging.WebpushConfig(
+                    fcm_options=messaging.WebpushFCMOptions(link=full_url)
+                )
+
             push_msg = messaging.MulticastMessage(
-                notification=messaging.Notification(
-                    title=title,
-                    body=message
-                ),
+                notification=messaging.Notification(title=title, body=message),
+                data={'link': link} if link else {},  # Отдаем фронтенду скрыто
+                webpush=webpush_config,
                 tokens=tokens,
             )
             messaging.send_each_for_multicast(push_msg)
     except Exception:
-        # Тихая обработка, чтобы не прерывать основной бизнес-процесс
         pass
 
 class DashboardOverduePagination(PageNumberPagination):
@@ -534,7 +540,8 @@ class TaskViewSet(viewsets.ModelViewSet):
             notify_user(
                 user=task.assignee,
                 title="Новая задача",
-                message=f"Вы назначены исполнителем новой задачи: {task.title}."
+                message=f"Вы назначены исполнителем новой задачи: {task.title}.",
+                link=f"task/{task.id}"
             )
 
     # ==========================================
@@ -574,7 +581,8 @@ class TaskViewSet(viewsets.ModelViewSet):
                         notify_user(
                             user=task.assignee,
                             title="Обновление от участника",
-                            message=f"{full_name} передвинул задачу '{task.title}'.\n{text}"
+                            message=f"{full_name} передвинул задачу '{task.title}'.\n{text}",
+                            link=f"task/{task.id}"
                         )
 
         return Response({'detail': 'Задача скрыта, лог сохранен'}, status=status.HTTP_200_OK)
@@ -636,14 +644,16 @@ class TaskViewSet(viewsets.ModelViewSet):
                 notify_user(
                     user=task.project.manager,
                     title="Задача завершена",
-                    message=f"Задача '{task.title}' была завершена исполнителем."
+                    message=f"Задача '{task.title}' была завершена исполнителем.",
+                    link=f"task/{task.id}"
                 )
 
             if task.assignee and self.request.user != task.assignee:
                 notify_user(
                     user=task.assignee,
                     title="Статус задачи изменен",
-                    message=f"Статус вашей задачи '{task.title}' изменен на '{task.get_status_display()}'."
+                    message=f"Статус вашей задачи '{task.title}' изменен на '{task.get_status_display()}'.",
+                    link=f"task/{task.id}"
                 )
 
         if old_assignee != task.assignee and task.assignee:
@@ -651,7 +661,9 @@ class TaskViewSet(viewsets.ModelViewSet):
                 notify_user(
                     user=task.assignee,
                     title="Новое назначение",
-                    message=f"Вы были назначены ответственным за задачу: {task.title}.")
+                    message=f"Вы были назначены ответственным за задачу: {task.title}.",
+                    link=f"task/{task.id}"
+                )
 
     def partial_update(self, request, *args, **kwargs):
         kwargs['partial'] = True
@@ -722,7 +734,8 @@ class TaskViewSet(viewsets.ModelViewSet):
                 notify_user(
                     user=task.assignee,
                     title="Новый комментарий",
-                    message=f"В вашей задаче '{task.title}' появился новый комментарий от {author_name}."
+                    message=f"В вашей задаче '{task.title}' появился новый комментарий от {author_name}.",
+                    link=f"task/{task.id}"
                 )
 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
