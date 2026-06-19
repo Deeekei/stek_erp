@@ -79,10 +79,17 @@ function Layout({ children, onLogout }) {
     await markAsRead(notif.id);
     setIsNotificationsOpen(false);
 
-    // Ищем ссылку формата /task/123 внутри текста уведомления
+    console.log("Кликнули по уведомлению. Текст сообщения:", notif.message);
+
+    // Ищем ссылку формата /task/123 внутри текста уведомления.
+    // Регулярка /task\/\d+/ ищет слово "task", затем "/", затем одну или несколько цифр (\d+)
     const urlMatch = notif.message.match(/\/task\/\d+/);
+
     if (urlMatch) {
+      console.log("Найдена ссылка, переходим по:", urlMatch[0]);
       navigate(urlMatch[0]);
+    } else {
+      console.warn("Ссылка в тексте не найдена! Проверьте формат сообщения в БД.");
     }
   };
 

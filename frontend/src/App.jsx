@@ -32,20 +32,27 @@ function App() {
 
     setupWebPush();
 
-    onMessageListener()
-      .then((payload) => {
-        setToast({
-          show: true,
-          title: payload.notification?.title || 'Новое уведомление',
-          body: payload.notification?.body || '',
-          link: payload.data?.link || '' // Извлекаем скрытую ссылку
-        });
+    // ИСПРАВЛЕНИЕ: Теперь используем колбэк и сохраняем функцию отписки
+    const unsubscribe = onMessageListener((payload) => {
+      console.log('Получен пуш на фронтенде:', payload);
+      setToast({
+        show: true,
+        title: payload.notification?.title || 'Новое уведомление',
+        body: payload.notification?.body || '',
+        link: payload.data?.link || '' // Извлекаем скрытую ссылку
+      });
 
-        setTimeout(() => {
-          setToast({ show: false, title: '', body: '', link: '' });
-        }, 5000);
-      })
-      .catch((err) => console.log('Ошибка при получении пуша на фронтенде: ', err));
+      setTimeout(() => {
+        setToast({ show: false, title: '', body: '', link: '' });
+      }, 5000);
+    });
+
+    // Очищаем слушатель, если компонент размонтируется
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
 
   }, [token]);
 
@@ -68,7 +75,8 @@ function App() {
           onClick={() => {
             setToast({ show: false, title: '', body: '', link: '' });
             if (toast.link) {
-              window.location.href = toast.link; // Переход по скрытой ссылке
+              // Переход по скрытой ссылке
+              window.location.href = toast.link;
             }
           }}
         >

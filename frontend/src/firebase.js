@@ -11,7 +11,6 @@ const firebaseConfig = {
   appId: "1:176661325401:web:0e5dc9d8615835abf2b348"
 };
 
-
 const app = initializeApp(firebaseConfig);
 export const messaging = getMessaging(app);
 
@@ -36,10 +35,9 @@ export const requestForToken = async () => {
   }
 };
 
-// Функция-слушатель для пушей, когда вкладка с ERP открыта
-export const onMessageListener = () =>
-  new Promise((resolve) => {
-    onMessage(messaging, (payload) => {
-      resolve(payload);
-    });
+// ИСПРАВЛЕНИЕ: Теперь это постоянный слушатель через callback, а не одноразовый Promise
+export const onMessageListener = (callback) => {
+  return onMessage(messaging, (payload) => {
+    callback(payload);
   });
+};
