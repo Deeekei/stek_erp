@@ -56,15 +56,12 @@ services:
 
   celery-beat:
     build: ./backend
-    # Команда запускает сервис beat вместо worker
     command: celery -A Mini_ERP beat -l info
     volumes:
       - ./backend:/app
     depends_on:
       - redis
       - db
-    env_file:
-      - .env
 
   frontend:
     # Фронтенд собирается из папки frontend
