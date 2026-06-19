@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 import sys
 from datetime import timedelta
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -158,3 +159,13 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
+
+
+CELERY_BEAT_SCHEDULE = {
+    'check-deadlines-every-morning': {
+        'task': 'apps.projects.tasks.check_deadlines_and_notify',
+        'schedule': crontab(hour=7, minute=0),
+    },
+}
+
+CELERY_TIMEZONE = 'Europe/Moscow'
