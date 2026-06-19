@@ -30,7 +30,6 @@ from datetime import datetime, timedelta, date
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import PermissionDenied
 
-
 User = get_user_model()
 
 
@@ -79,9 +78,11 @@ def notify_user(user, title, message, link=None):
     except Exception:
         pass
 
+
 class DashboardOverduePagination(PageNumberPagination):
     page_size = 10  # Ровно 10 задач на страницу
     page_size_query_param = 'page_size'
+
 
 def calculate_finish_date(start_date_str, duration_str):
     """
@@ -115,6 +116,7 @@ def calculate_finish_date(start_date_str, duration_str):
     except Exception:
         return start_date_str
 
+
 class CanEditTaskPermission(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         # 1. Чтение задачи разрешено всем
@@ -135,8 +137,9 @@ class CanEditTaskPermission(permissions.BasePermission):
         if obj.project and obj.project.manager == request.user:
             return True
 
-        # 🌟 ИСПРАВЛЕНИЕ: Если проект ограниченный, и юзер входит в круг лиц — ему МОЖНО редактировать параметры/сроки
-        if obj.project and obj.project.visibility == 'selected' and obj.project.allowed_users.filter(id=request.user.id).exists():
+        # 🌟 Если проект ограниченный, и юзер входит в круг лиц — ему МОЖНО редактировать параметры/сроки
+        if obj.project and obj.project.visibility == 'selected' and obj.project.allowed_users.filter(
+                id=request.user.id).exists():
             return True
 
         # 5. ИСПОЛНИТЕЛЬ задачи может её редактировать (например, менять статус)
@@ -145,6 +148,7 @@ class CanEditTaskPermission(permissions.BasePermission):
 
         # Всем остальным редактировать задачу запрещено
         return False
+
 
 class ProjectViewSet(viewsets.ModelViewSet):
     serializer_class = ProjectSerializer
@@ -158,7 +162,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         user = self.request.user
 
         # Директора и Админы видят ВСЕ проекты (включая Приватные)
-        if user.role in ['admin',] or user.is_superuser:
+        if user.role in ['admin', ] or user.is_superuser:
             return Project.objects.all().distinct()
 
         # Для остальных собираем по правилам
@@ -297,38 +301,30 @@ class ProjectViewSet(viewsets.ModelViewSet):
         Выгрузка всех задач текущего проекта в красивый Excel-файл.
         """
         project = self.get_object()
-        # Вытаскиваем все задачи этого проекта, сортируя по дате начала
         tasks = Task.objects.filter(project=project).order_by('plan_start_date')
 
-        # 1. Создаем рабочую книгу Excel
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Список задач"
 
-        # 2. Объявляем стили оформления
         font_title = Font(name='Arial', size=14, bold=True, color='1E293B')
         font_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
         font_body = Font(name='Arial', size=10)
 
-        # Красивый темно-синий цвет для шапки (как в дорогих ERP)
         fill_header = PatternFill(start_color='1E3A8A', end_color='1E3A8A', fill_type='solid')
-
         align_center = Alignment(horizontal='center', vertical='center')
         align_left = Alignment(horizontal='left', vertical='center')
 
-        # 3. Добавляем главный заголовок документа
         ws.merge_cells('A1:H1')
         ws['A1'] = f"Проект: {project.title}"
         ws['A1'].font = font_title
         ws.row_dimensions[1].height = 30
-        ws.append([])  # Пустая строка для визуального отступа
+        ws.append([])
 
-        # 4. Создаем шапку таблицы
         headers = ["ID", "Название задачи", "Описание", "Исполнитель", "Статус", "Критичность", "Дата начала",
                    "Дедлайн"]
         ws.append(headers)
 
-        # Стилизуем шапку (строка №3)
         ws.row_dimensions[3].height = 25
         for col_num, header in enumerate(headers, 1):
             cell = ws.cell(row=3, column=col_num)
@@ -336,13 +332,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
             cell.fill = fill_header
             cell.alignment = align_center
 
-        # Словари для человекочитаемого перевода статусов и приоритетов
         status_mapping = {'new': 'Новая', 'in_progress': 'В работе', 'completed': 'Завершена'}
         priority_mapping = {'low': 'Низкая', 'medium': 'Средняя', 'high': 'Высокая', 'critical': 'Критичная'}
 
-        # 5. Заполняем таблицу данными из БД
         for task in tasks:
-            # Безопасно получаем имя исполнителя
             assignee_name = "Не назначен"
             if task.assignee:
                 assignee_name = task.assignee.get_full_name() or task.assignee.username
@@ -359,35 +352,27 @@ class ProjectViewSet(viewsets.ModelViewSet):
             ]
             ws.append(row)
 
-        # 6. Тонкая настройка: авто-подбор ширины колонок по контенту
         for col in ws.columns:
             max_len = max(len(str(cell.value or '')) for cell in col)
             col_letter = get_column_letter(col[0].column)
-            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)  # минимум 12 символов
+            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-        # 7. Выравнивание текста в ячейках данных и шрифты
         for row in ws.iter_rows(min_row=4, max_row=ws.max_row, min_col=1, max_col=8):
-            ws.row_dimensions[row[0].row].height = 20  # Высота строк данных
+            ws.row_dimensions[row[0].row].height = 20
             for cell in row:
                 cell.font = font_body
-                # Даты, ID, Статусы и Критичность — по центру, тексты — по левому краю
                 if cell.column in [1, 5, 6, 7, 8]:
                     cell.alignment = align_center
                 else:
                     cell.alignment = align_left
 
-        # 8. Формируем HTTP-ответ в виде файла Excel
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        # Кодируем название файла, чтобы оно не ломалось из-за кириллицы
         filename = f"Project_{project.id}_Tasks.xlsx"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
         wb.save(response)
         return response
 
-    # ==========================================
-    # 2. ИМПОРТ ИЗ GANTT PRO (CSV)
-    # ==========================================
     @action(detail=True, methods=['post'])
     def import_csv(self, request, pk=None):
         project_instance = self.get_object()
@@ -406,7 +391,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             io_string = io.StringIO(decoded_file)
             reader = csv.reader(io_string, delimiter=',')
 
-            for _ in range(4):  # Пропускаем 4 мусорные строки GanttPRO
+            for _ in range(4):
                 next(reader, None)
 
             headers = next(reader, None)
@@ -444,7 +429,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 start_date = start_str if start_str else None
                 finish_date = end_str if end_str else None
 
-                # --- УМНАЯ ПОДСТРАХОВКА ДЛЯ ДАТ ---
                 if not finish_date and start_date:
                     finish_date = start_date
                 elif not start_date and finish_date:
@@ -498,7 +482,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
-    # Пермишены оставляем твои, но главная "магия" защиты будет в методе update
     permission_classes = [IsAuthenticated, CanEditTaskPermission]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['project']
@@ -506,26 +489,20 @@ class TaskViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        # ОПТИМИЗАЦИЯ БД 2: Убиваем N+1 запросы для задач
         queryset = Task.objects.select_related(
             'project', 'assignee', 'parent_task'
         ).prefetch_related(
             'comments', 'attachments', 'dependencies', 'participants', 'hidden_for'
         )
 
-        # 1. Фильтр по проекту (для страницы внутри конкретного проекта)
         project_id = self.request.query_params.get('project')
         if project_id:
-            # ИСПРАВЛЕНО: Здесь фильтруем именно по ID проекта!
             queryset = queryset.filter(project_id=project_id)
 
-        # 2. ФИЛЬТР: Только "Мои задачи" (Исполнитель ИЛИ Участник)
         assigned_to_me = self.request.query_params.get('assigned_to_me')
         if assigned_to_me == 'true':
-            # ИСПРАВЛЕНО: Вот здесь должны быть Q-объекты!
             queryset = queryset.filter(Q(assignee=user) | Q(participants=user)).distinct()
 
-        # 3. НОВЫЙ ФИЛЬТР: Исключаем задачи, которые участник "смахнул" со своей доски
         if user.is_authenticated:
             queryset = queryset.exclude(hidden_for=user)
 
@@ -535,18 +512,17 @@ class TaskViewSet(viewsets.ModelViewSet):
         """ Триггер 1: Создание новой задачи """
         task = serializer.save()
 
-        # Если задаче назначен исполнитель, и это не тот человек, который её создал
         if task.assignee and task.assignee != self.request.user:
+            # Формируем ссылки для уведомления
+            task_link = f"/task/{task.id}"
+            full_url = f"https://erp.stekufa.ru{task_link}"
+
             notify_user(
                 user=task.assignee,
                 title="Новая задача",
-                message=f"Вы назначены исполнителем новой задачи: {task.title}.",
-                link=f"task/{task.id}"
+                message=f"Вы назначены исполнителем новой задачи: {task.title}.\nПерейти к задаче: {full_url}",
+                link=task_link
             )
-
-    # ==========================================
-    # НОВЫЙ БЛОК: Логика взаимодействия с задачей
-    # ==========================================
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def hide(self, request, pk=None):
@@ -556,10 +532,8 @@ class TaskViewSet(viewsets.ModelViewSet):
         task = self.get_object()
         user = request.user
 
-        # 1. Скрываем задачу
         task.hidden_for.add(user)
 
-        # 2. Формируем автоматический комментарий
         target_status = request.data.get('status')
         if target_status:
             full_name = user.get_full_name() or user.username
@@ -571,18 +545,20 @@ class TaskViewSet(viewsets.ModelViewSet):
                 text = f"✅ {full_name} завершил(а) свою часть работы"
 
             if text:
-                # Создаем комментарий от лица пользователя
                 serializer = CommentSerializer(data={'text': text})
                 if serializer.is_valid():
                     serializer.save(task=task, author=user)
 
-                    # Отправляем уведомление ответственному за задачу
                     if task.assignee and task.assignee != user:
+                        # Добавляем ссылки для ответственного
+                        task_link = f"/task/{task.id}"
+                        full_url = f"https://erp.stekufa.ru{task_link}"
+
                         notify_user(
                             user=task.assignee,
                             title="Обновление от участника",
-                            message=f"{full_name} передвинул задачу '{task.title}'.\n{text}",
-                            link=f"task/{task.id}"
+                            message=f"{full_name} передвинул задачу '{task.title}'.\n{text}\nПерейти к задаче: {full_url}",
+                            link=task_link
                         )
 
         return Response({'detail': 'Задача скрыта, лог сохранен'}, status=status.HTTP_200_OK)
@@ -596,7 +572,6 @@ class TaskViewSet(viewsets.ModelViewSet):
         user = request.user
         project = task.project
 
-        # Вычисляем, имеет ли текущий юзер права БОССА для данного проекта
         is_boss = (
                 user.role in ['admin', 'director'] or
                 user.is_superuser or
@@ -605,23 +580,18 @@ class TaskViewSet(viewsets.ModelViewSet):
                 (project.visibility == 'selected' and project.allowed_users.filter(id=user.id).exists())
         )
 
-        # 1. Создаем копию присланных данных (чтобы не трогать неизменяемый request.data)
         data_to_save = request.data.copy()
 
-        # 2. Фильтруем данные, если пользователь НЕ босс
         if not is_boss:
             if user == task.assignee:
-                # Если это ИСПОЛНИТЕЛЬ: Оставляем в копии только разрешенные поля.
                 allowed_keys = ['status', 'delay_reason', 'actual_end_date']
                 data_to_save = {k: v for k, v in data_to_save.items() if k in allowed_keys}
             else:
-                # Если это просто участник — запрещаем редактирование тела задачи.
                 return Response(
                     {'detail': 'У вас нет прав на редактирование параметров этой задачи.'},
                     status=status.HTTP_403_FORBIDDEN
                 )
 
-        # 3. Выполняем стандартную логику DRF, но передаем нашу отфильтрованную копию (data_to_save)
         serializer = self.get_serializer(task, data=data_to_save, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
@@ -639,21 +609,25 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         task = serializer.save()
 
+        # Заранее формируем ссылки
+        task_link = f"/task/{task.id}"
+        full_url = f"https://erp.stekufa.ru{task_link}"
+
         if old_status != task.status:
             if task.status == 'completed' and task.project.manager:
                 notify_user(
                     user=task.project.manager,
                     title="Задача завершена",
-                    message=f"Задача '{task.title}' была завершена исполнителем.",
-                    link=f"task/{task.id}"
+                    message=f"Задача '{task.title}' была завершена исполнителем.\nПерейти к задаче: {full_url}",
+                    link=task_link
                 )
 
             if task.assignee and self.request.user != task.assignee:
                 notify_user(
                     user=task.assignee,
                     title="Статус задачи изменен",
-                    message=f"Статус вашей задачи '{task.title}' изменен на '{task.get_status_display()}'.",
-                    link=f"task/{task.id}"
+                    message=f"Статус вашей задачи '{task.title}' изменен на '{task.get_status_display()}'.\nПерейти к задаче: {full_url}",
+                    link=task_link
                 )
 
         if old_assignee != task.assignee and task.assignee:
@@ -661,8 +635,8 @@ class TaskViewSet(viewsets.ModelViewSet):
                 notify_user(
                     user=task.assignee,
                     title="Новое назначение",
-                    message=f"Вы были назначены ответственным за задачу: {task.title}.",
-                    link=f"task/{task.id}"
+                    message=f"Вы были назначены ответственным за задачу: {task.title}.\nПерейти к задаче: {full_url}",
+                    link=task_link
                 )
 
     def partial_update(self, request, *args, **kwargs):
@@ -671,7 +645,6 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def dashboard_metrics(self, request):
-        """Возвращает только цифры (статистику) для графиков за 2 миллисекунды."""
         user = request.user
         today = date.today()
 
@@ -686,7 +659,6 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def overdue(self, request):
-        """Возвращает просроченные задачи пачками по 10 штук."""
         user = request.user
         today = date.today()
 
@@ -705,7 +677,6 @@ class TaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def shift_deadlines(self, request, pk=None):
         task = self.get_object()
-
         days_delta = request.data.get('days', 0)
         cascade = request.data.get('cascade', True)
 
@@ -731,11 +702,15 @@ class TaskViewSet(viewsets.ModelViewSet):
 
             if task.assignee and task.assignee != request.user:
                 author_name = request.user.get_full_name() or request.user.username
+                # Добавляем ссылки для уведомления о комментарии
+                task_link = f"/task/{task.id}"
+                full_url = f"https://erp.stekufa.ru{task_link}"
+
                 notify_user(
                     user=task.assignee,
                     title="Новый комментарий",
-                    message=f"В вашей задаче '{task.title}' появился новый комментарий от {author_name}.",
-                    link=f"task/{task.id}"
+                    message=f"В вашей задаче '{task.title}' появился новый комментарий от {author_name}.\nПерейти к задаче: {full_url}",
+                    link=task_link
                 )
 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -757,6 +732,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         serializer = AttachmentSerializer(attachment)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+
 class AttachmentViewSet(viewsets.ModelViewSet):
     queryset = Attachment.objects.all()
     serializer_class = AttachmentSerializer
@@ -772,7 +748,6 @@ class EmployeeReportView(APIView):
         today = timezone.now().date()
         tasks = Task.objects.filter(assignee=employee).order_by('-id')
 
-        # Считаем статистику
         stats = tasks.aggregate(
             total_tasks=Count('id'),
             completed_tasks=Count('id', filter=Q(status='completed')),
@@ -780,18 +755,15 @@ class EmployeeReportView(APIView):
             in_progress_tasks=Count('id', filter=Q(status='in_progress'))
         )
 
-        # 1. Создаем Excel
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Отчет по сотруднику"
 
-        # Стили
         font_title = Font(name='Arial', size=14, bold=True)
         font_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
         fill_header = PatternFill(start_color='1E3A8A', end_color='1E3A8A', fill_type='solid')
         align_center = Alignment(horizontal='center', vertical='center')
 
-        # 2. Заголовок и статистика
         ws.merge_cells('A1:E1')
         ws[
             'A1'] = f"Отчет по сотруднику: {employee.get_full_name() or employee.username} ({employee.position or 'Должность не указана'})"
@@ -802,9 +774,8 @@ class EmployeeReportView(APIView):
         ws.append(["В работе:", stats['in_progress_tasks']])
         ws.append(["Завершено:", stats['completed_tasks']])
         ws.append(["Просрочено:", stats['overdue_tasks']])
-        ws.append([])  # Пустая строка для отступа
+        ws.append([])
 
-        # 3. Шапка таблицы задач
         headers = ["ID", "Название задачи", "Статус", "Критичность", "Дедлайн"]
         ws.append(headers)
 
@@ -815,7 +786,6 @@ class EmployeeReportView(APIView):
             cell.fill = fill_header
             cell.alignment = align_center
 
-        # 4. Данные задач
         status_map = {'new': 'Новая', 'in_progress': 'В работе', 'completed': 'Завершена'}
         priority_map = {'low': 'Низкая', 'medium': 'Средняя', 'high': 'Высокая', 'critical': 'Критичная'}
 
@@ -828,12 +798,10 @@ class EmployeeReportView(APIView):
                 task.plan_end_date.strftime('%Y-%m-%d') if task.plan_end_date else "Не указан"
             ])
 
-        # 5. Выравнивание ширины колонок
         for col in ws.columns:
             max_len = max(len(str(cell.value or '')) for cell in col)
             ws.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 2, 12)
 
-        # 6. Отдаем файл
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         filename = f"Employee_{employee.id}_Report.xlsx"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -850,9 +818,8 @@ class ProjectReportView(APIView):
             return Response({"error": "Проект не найден"}, status=status.HTTP_404_NOT_FOUND)
 
         today = timezone.now().date()
-        tasks = project.tasks.all()  # Убедись, что related_name в модели Task равен 'tasks'
+        tasks = project.tasks.all()
 
-        # Считаем общую стату
         project_stats = tasks.aggregate(
             total=Count('id'),
             completed=Count('id', filter=Q(status='completed')),
@@ -860,7 +827,6 @@ class ProjectReportView(APIView):
             overdue=Count('id', filter=~Q(status='completed') & Q(plan_end_date__lt=today))
         )
 
-        # Считаем стату по сотрудникам
         employee_stats = tasks.values(
             'assignee__id', 'assignee__first_name', 'assignee__last_name'
         ).annotate(
@@ -868,17 +834,15 @@ class ProjectReportView(APIView):
             overdue_tasks=Count('id', filter=~Q(status='completed') & Q(plan_end_date__lt=today))
         )
 
-        # 1. Создаем Excel
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Отчет по проекту"
 
         font_title = Font(name='Arial', size=14, bold=True)
         font_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
-        fill_header = PatternFill(start_color='0F766E', end_color='0F766E', fill_type='solid')  # Темно-бирюзовый
+        fill_header = PatternFill(start_color='0F766E', end_color='0F766E', fill_type='solid')
         align_center = Alignment(horizontal='center', vertical='center')
 
-        # 2. Заголовок и общая статистика
         ws.merge_cells('A1:D1')
         ws['A1'] = f"Проект: {project.title} (Статус: {project.get_status_display()})"
         ws['A1'].font = font_title
@@ -890,7 +854,6 @@ class ProjectReportView(APIView):
         ws.append(["Просрочено:", project_stats['overdue']])
         ws.append([])
 
-        # 3. Статистика по исполнителям (Таблица 1)
         ws.append(["Статистика по исполнителям"])
         ws.cell(row=ws.max_row, column=1).font = Font(bold=True, size=12)
 
@@ -914,12 +877,10 @@ class ProjectReportView(APIView):
 
         ws.append([])
 
-        # 4. Выравнивание ширины колонок
         for col in ws.columns:
             max_len = max(len(str(cell.value or '')) for cell in col)
             ws.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 2, 14)
 
-        # 5. Отдаем файл
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         filename = f"Project_{project.id}_Report.xlsx"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -927,8 +888,10 @@ class ProjectReportView(APIView):
 
         return response
 
+
 class NewsPagination(PageNumberPagination):
     page_size = 3
+
 
 class NewsViewSet(viewsets.ModelViewSet):
     queryset = News.objects.all()
@@ -973,7 +936,6 @@ class NotificationViewSet(viewsets.ModelViewSet):
     def save_fcm_token(self, request):
         token = request.data.get('token')
         if token:
-            # get_or_create предотвращает создание дубликатов, если токен уже есть
             FCMDevice.objects.get_or_create(user=request.user, registration_id=token)
             return Response({'status': 'Токен успешно сохранен'}, status=status.HTTP_200_OK)
         return Response({'error': 'Токен не предоставлен'}, status=status.HTTP_400_BAD_REQUEST)
