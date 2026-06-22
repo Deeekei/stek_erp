@@ -52,6 +52,7 @@ function ProjectDetail() {
   const [ganttZoom, setGanttZoom] = useState(ViewMode.Day);
   const [collapsedTasks, setCollapsedTasks] = useState([]);
 
+  // Стандартная модалка создания
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
@@ -66,10 +67,26 @@ function ProjectDetail() {
   const [newTaskFiles, setNewTaskFiles] = useState([]);
   const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false);
 
+  // Модалка просмотра и редактирования
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [newCommentText, setNewCommentText] = useState('');
+
+  // === СТЕЙТЫ ДЛЯ МОДАЛКИ ДУБЛИРОВАНИЯ (КАК НА ДАШБОРДЕ) ===
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [allProjectsList, setAllProjectsList] = useState([]);
+  const [dupTaskTitle, setDupTaskTitle] = useState('');
+  const [dupTaskDescription, setDupTaskDescription] = useState('');
+  const [dupTaskStatus, setDupTaskStatus] = useState('new');
+  const [dupTaskPriority, setDupTaskPriority] = useState('medium');
+  const [dupTaskPlanStart, setDupTaskPlanStart] = useState('');
+  const [dupTaskPlanEnd, setDupTaskPlanEnd] = useState('');
+  const [dupTaskAssignee, setDupTaskAssignee] = useState(null);
+  const [dupTaskParticipants, setDupTaskParticipants] = useState([]);
+  const [dupTaskProject, setDupTaskProject] = useState(null);
+  const [dupTaskFiles, setDupTaskFiles] = useState([]);
+  const [dupTaskIsMilestone, setDupTaskIsMilestone] = useState(false);
 
   const [isCompletionModalOpen, setIsCompletionModalOpen] = useState(false);
   const [taskToComplete, setTaskToComplete] = useState(null);
@@ -156,7 +173,6 @@ function ProjectDetail() {
     } catch (error) { alert("Не удалось удалить проект."); }
   };
 
-  // === ОБРАБОТЧИК ЗАКРЕПЛЕНИЯ ПРОЕКТА ===
   const handleTogglePin = async () => {
     try {
       const response = await api.post(`projects/${id}/toggle_pin/`);
@@ -543,6 +559,79 @@ function ProjectDetail() {
     } catch (error) { alert("Ошибка удаления."); }
   };
 
+  // === ЛОГИКА ДУБЛИРОВАНИЯ (ПОДГОТОВКА ПОЛЕЙ И ОТКРЫТИЕ МОДАЛКИ) ===
+  const handleOpenDuplicateModal = async () => {
+    if (!editingTask) return;
+
+    // 1. Предзаполняем стейт дубликата данными текущей задачи
+    const assigneeId = editingTask.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id : editingTask.assignee;
+    setDupTaskTitle(`${editingTask.title} (Копия)`);
+    setDupTaskDescription(editingTask.description || '');
+    setDupTaskStatus('new'); // Копия всегда рождается в статусе "Новая"
+    setDupTaskPriority(editingTask.priority || 'medium');
+    setDupTaskPlanStart(editingTask.plan_start_date || '');
+    setDupTaskPlanEnd(editingTask.plan_end_date || '');
+    setDupTaskAssignee(assigneeId || null);
+    setDupTaskParticipants(editingTask.participants || []);
+    setDupTaskProject(editingTask.project || parseInt(id));
+    setDupTaskIsMilestone(editingTask.is_milestone || false);
+    setDupTaskFiles([]);
+
+    // 2. Подгружаем полный список проектов для селекта, если он еще пустой
+    if (allProjectsList.length === 0) {
+      try {
+        const resP = await api.get('projects/');
+        setAllProjectsList(resRes => resP.data.results || resP.data);
+      } catch (e) { console.error("Ошибка загрузки проектов:", e); }
+    }
+
+    // 3. Закрываем окно просмотра и открываем форму создания копии
+    setIsEditModalOpen(false);
+    setIsDuplicateModalOpen(true);
+  };
+
+  // === ОТПРАВКА ДУБЛИКАТА НА БЭКЕНД ===
+  const handleDuplicateTaskSubmit = async (e) => {
+    e.preventDefault();
+    if (!dupTaskProject) return alert("Пожалуйста, выберите проект для копии задачи!");
+
+    const payload = {
+      title: dupTaskTitle,
+      description: dupTaskDescription,
+      status: dupTaskStatus,
+      priority: dupTaskPriority,
+      project: parseInt(dupTaskProject),
+      assignee: dupTaskAssignee,
+      participants: dupTaskParticipants,
+      is_milestone: dupTaskIsMilestone
+    };
+    if (dupTaskPlanStart) payload.plan_start_date = dupTaskPlanStart;
+    if (dupTaskPlanEnd) payload.plan_end_date = dupTaskPlanEnd;
+
+    try {
+      const response = await api.post('tasks/', payload);
+      let createdTask = response.data;
+
+      // Если прикрепили новые файлы
+      if (dupTaskFiles.length > 0) {
+        for (const file of dupTaskFiles) {
+          const formData = new FormData(); formData.append('file', file);
+          await api.post(`tasks/${createdTask.id}/upload_files/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        }
+      }
+
+      // Если создали копию внутри текущего проекта — сразу обновляем список задач на экране
+      if (parseInt(dupTaskProject) === parseInt(id)) {
+        fetchTasks();
+      }
+
+      setIsDuplicateModalOpen(false);
+      alert("Копия задачи успешно создана!");
+    } catch (error) {
+      alert("Ошибка при создании копии задачи. Проверьте правильность заполнения полей.");
+    }
+  };
+
   const isBossAll = isFullAccess || project?.owner === currentUser?.id || project?.manager === currentUser?.id || (project?.visibility === 'selected' && project?.allowed_users?.includes(currentUser?.id));
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
   const isParticipantTask = (editingTask?.participants || []).includes(currentUser?.id);
@@ -559,6 +648,11 @@ function ProjectDetail() {
     }
   };
 
+  const allProjectOptions = useMemo(() => {
+    const list = allProjectsList.length > 0 ? allProjectsList : (project ? [project] : []);
+    return list.map(p => ({ value: p.id, label: p.title }));
+  }, [allProjectsList, project]);
+
   const kanbanColumns = [
     { id: 'new', title: 'Новые', color: 'border-gray-200 bg-gray-50' },
     { id: 'in_progress', title: 'В работе', color: 'border-blue-200 bg-blue-50' },
@@ -573,8 +667,6 @@ function ProjectDetail() {
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-6 gap-4">
         <div>
           <div className="text-sm font-medium text-gray-500 mb-1"><Link to="/projects" className="hover:text-blue-600">Проекты</Link> <span className="mx-2">/</span> {project.title}</div>
-
-          {/* === НАЗВАНИЕ + КНОПКА ЗАКРЕПЛЕНИЯ === */}
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 break-words flex items-center gap-2">
             {project.title}
             <button
@@ -587,7 +679,6 @@ function ProjectDetail() {
               </span>
             </button>
           </h1>
-
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full lg:w-auto">
           <input type="file" accept=".xml,.csv" ref={fileInputRef} onChange={handleImportFile} className="hidden" />
@@ -726,7 +817,6 @@ function ProjectDetail() {
                   onMouseDown={startResizingColumn}
                   className="resizer-handle absolute top-0 bottom-0 z-20 w-4 cursor-col-resize flex justify-center group"
                   style={{ left: listWidth - 2 }}
-                  title="Потяните, чтобы изменить ширину"
                 >
                   <div className="resizer-handle w-[2px] h-full bg-transparent group-hover:bg-blue-400 transition-colors" />
                 </div>
@@ -755,6 +845,7 @@ function ProjectDetail() {
         </div>
       )}
 
+      {/* === МОДАЛКА ПРОСМОТРА И РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1200px] h-[90vh] flex flex-col overflow-hidden">
@@ -767,7 +858,12 @@ function ProjectDetail() {
                         <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
                         <span className="text-xs font-bold px-2 py-1 bg-blue-100 text-blue-800 rounded uppercase tracking-wide">📁 Проект: {project?.title}</span>
                       </div>
-                      <button onClick={() => handleQuickDelete(editingTask.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap">Удалить</button>
+
+                      {/* === КНОПКИ ДУБЛИРОВАНИЯ И УДАЛЕНИЯ === */}
+                      <div className="flex items-center gap-2">
+                        <button onClick={handleOpenDuplicateModal} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1">📑 Дублировать</button>
+                        <button onClick={() => handleQuickDelete(editingTask.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap">Удалить</button>
+                      </div>
                     </div>
 
                     <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
@@ -860,6 +956,9 @@ function ProjectDetail() {
                           {isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}
                         </span>
                       </div>
+
+                      {/* === КНОПКА ДУБЛИРОВАНИЯ ДЛЯ ОБЫЧНЫХ УЧАСТНИКОВ === */}
+                      <button onClick={handleOpenDuplicateModal} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1">📑 Дублировать</button>
                     </div>
 
                     <h2 className="text-2xl font-extrabold text-gray-900 mb-6 flex-shrink-0 leading-tight break-words">
@@ -960,6 +1059,64 @@ function ProjectDetail() {
              {(!canEditAll && isWorkerTask) && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить статус</button>}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* === НОВАЯ МОДАЛКА СОЗДАНИЯ КОПИИ ЗАДАЧИ (ИДЕНТИЧНА ДАШБОРДУ) === */}
+      {isDuplicateModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsDuplicateModalOpen(false); }}>
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">Создание копии задачи</h3>
+            <form onSubmit={handleDuplicateTaskSubmit} className="space-y-4 sm:space-y-6">
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Название *</label>
+                  <input type="text" value={dupTaskTitle} onChange={(e) => setDupTaskTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 break-words font-bold" required />
+                </div>
+
+                <div className="sm:col-span-2 flex items-center mb-2">
+                  <input
+                    type="checkbox"
+                    id="dup_is_milestone"
+                    checked={dupTaskIsMilestone}
+                    onChange={(e) => setDupTaskIsMilestone(e.target.checked)}
+                    className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                  />
+                  <label htmlFor="dup_is_milestone" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
+                    🚩 Отметить как веху
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Проект *</label>
+                  <Select
+                    options={allProjectOptions}
+                    value={allProjectOptions.find(o => o.value == dupTaskProject) || null}
+                    onChange={(opt) => setDupTaskProject(opt ? opt.value : null)}
+                    placeholder="Выбрать проект..."
+                    isSearchable
+                    menuPosition="fixed"
+                    styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
+                    noOptionsMessage={() => "Нет доступных проектов"}
+                  />
+                </div>
+
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == dupTaskAssignee) || null} onChange={(opt) => setDupTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => dupTaskParticipants.includes(o.value))} onChange={(selected) => setDupTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label><select value={dupTaskPriority} onChange={(e) => setDupTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-4 border border-gray-100">
+                <div><label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План)</label><input type="date" value={dupTaskPlanStart} onChange={(e) => setDupTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" /></div>
+                <div><label className="block text-xs font-bold text-gray-500 mb-1">Дедлайн *</label><input type="date" value={dupTaskPlanEnd} onChange={(e) => setDupTaskPlanEnd(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" required /></div>
+              </div>
+              <div className="border border-dashed border-gray-300 p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors">
+                <label className="block text-sm font-bold text-gray-700 mb-2">📎 Прикрепить новые файлы</label><input type="file" multiple onChange={(e) => setDupTaskFiles(Array.from(e.target.files))} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer" />
+                {dupTaskFiles.length > 0 && (<div className="mt-3 flex flex-wrap gap-2">{dupTaskFiles.map((f, idx) => (<span key={idx} className="bg-white border border-gray-200 text-xs text-gray-600 px-2.5 py-1 rounded shadow-sm">📄 {f.name}</span>))}</div>)}
+              </div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Описание</label><textarea value={dupTaskDescription} onChange={(e) => setDupTaskDescription(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg min-h-[80px] break-words"></textarea></div>
+              <div className="flex justify-end gap-3 pt-6 border-t border-gray-50"><button type="button" onClick={() => setIsDuplicateModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Отмена</button><button type="submit" className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition-colors font-bold">Создать копию</button></div>
+            </form>
           </div>
         </div>
       )}
