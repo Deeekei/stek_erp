@@ -19,6 +19,9 @@ class User(AbstractUser):
     role = models.CharField(max_length=50, choices=ROLE_CHOICES, default='executor')
     is_blocked = models.BooleanField(default=False)
     can_post_news = models.BooleanField(default=False, verbose_name="Может писать новости")
+    phone_number = models.CharField(max_length=20, blank=True, null=True, verbose_name="Номер телефона")
+    cabinet = models.CharField(max_length=50, blank=True, null=True, verbose_name="Кабинет")
+    hr_note = models.TextField(blank=True, null=True, verbose_name="Служебная заметка (HR/Админ)")
 
     groups = models.ManyToManyField(
         'auth.Group',

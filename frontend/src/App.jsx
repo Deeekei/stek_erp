@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { requestForToken, onMessageListener } from './firebase';
 import api from './api';
-
+import Employees from './components/Employees';
 import Login from './components/Login';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard.jsx';
@@ -103,7 +103,7 @@ function App() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/my-tasks" element={<MyTasks />} />
-
+          <Route path="/employees" element={<Employees />} />
           {/* Скрытый маршрут для отдельной задачи */}
           <Route path="/task/:id" element={<TaskStandalone />} />
 
