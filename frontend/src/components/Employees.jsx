@@ -47,7 +47,6 @@ function Employees() {
     }
   };
 
-  // Вытаскиваем уникальный список всех существующих отделов для фильтра
   const allDepartments = useMemo(() => {
     const depts = new Set();
     employees.forEach(emp => {
@@ -56,7 +55,6 @@ function Employees() {
     return Array.from(depts);
   }, [employees]);
 
-  // Логика фильтрации по имени/фамилии и отделу
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
       const fullName = `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase();
@@ -68,7 +66,6 @@ function Employees() {
     });
   }, [employees, searchQuery, selectedDept]);
 
-  // Вычисляем права доступа
   const isMe = currentUser && selectedEmp && currentUser.id === selectedEmp.id;
 
   const isHRorBoss = currentUser && (
@@ -95,7 +92,6 @@ function Employees() {
     e.preventDefault();
     setSaving(true);
 
-    // Собираем то, что разрешено менять текущему пользователю
     const payload = {};
     if (isMe) {
       payload.first_name = editFirstName;
@@ -112,8 +108,6 @@ function Employees() {
 
     try {
       const res = await api.patch(`users/${selectedEmp.id}/update_profile/`, payload);
-
-      // Обновляем локальный стейт списка и модалки полученными от бэкенда данными
       setEmployees(prev => prev.map(u => u.id === selectedEmp.id ? res.data : u));
       setSelectedEmp(res.data);
       setIsEditMode(false);
@@ -130,13 +124,11 @@ function Employees() {
   return (
     <div className="h-full flex flex-col">
 
-      {/* ЗАГОЛОВОК */}
       <div className="mb-6">
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Сотрудники</h1>
         <p className="text-sm text-gray-500 mt-1">Контакты, кабинеты и рабочие статусы коллег ({filteredEmployees.length} чел.)</p>
       </div>
 
-      {/* ПАНЕЛЬ ФИЛЬТРОВ И ПОИСКА */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 mb-6 flex flex-col sm:flex-row gap-3">
         <div className="flex-1 relative">
           <span className="absolute left-3.5 top-2.5 text-gray-400">🔍</span>
@@ -163,7 +155,6 @@ function Employees() {
         </div>
       </div>
 
-      {/* СЕТКА СОТРУДНИКОВ */}
       <div className="flex-1 overflow-y-auto pr-1">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-6">
           {filteredEmployees.map(emp => {
@@ -201,7 +192,6 @@ function Employees() {
                   </div>
                 </div>
 
-                {/* Быстрые контакты на карточке */}
                 <div className="space-y-1.5 pt-3 border-t border-gray-100 text-xs text-gray-600">
                   <div className="flex justify-between"><span className="text-gray-400">Кабинет:</span> <span className="font-bold text-gray-800">{emp.cabinet || '—'}</span></div>
                   <div className="flex justify-between"><span className="text-gray-400">Телефон:</span> <span className="font-bold text-gray-800">{emp.phone_number || '—'}</span></div>
@@ -229,7 +219,6 @@ function Employees() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) setSelectedEmp(null); }}>
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden relative animate-fade-in my-8">
 
-            {/* ШАПКА МОДАЛКИ */}
             <div className="bg-slate-900 text-white p-6 sm:p-8 relative">
               <button onClick={() => setSelectedEmp(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 w-8 h-8 rounded-full font-bold flex items-center justify-center transition-colors">✕</button>
 
@@ -244,12 +233,10 @@ function Employees() {
               </div>
             </div>
 
-            {/* ТЕЛО МОДАЛКИ */}
             <form onSubmit={handleSaveProfile} className="p-6 sm:p-8 space-y-6 max-h-[70vh] overflow-y-auto">
 
               <div className="flex justify-between items-center -mb-2">
                 <h4 className="font-black text-gray-800 text-xs uppercase tracking-wider">Основная информация</h4>
-                {/* Кнопку редактирования показываем, если это мой профиль ИЛИ если я HR/Директор */}
                 {(isMe || isHRorBoss) && !isEditMode && (
                   <button type="button" onClick={() => setIsEditMode(true)} className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors flex items-center gap-1">
                     ✏️ Редактировать данные
@@ -258,7 +245,6 @@ function Employees() {
               </div>
 
               {isEditMode ? (
-                /* === РЕЖИМ РЕДАКТИРОВАНИЯ === */
                 <div className="space-y-4 bg-gray-50 p-5 rounded-2xl border border-gray-200">
                   {isMe && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -269,7 +255,6 @@ function Employees() {
                     </div>
                   )}
 
-                  {/* Изменять системную должность (position) на бэкенде разрешено только директорам/админам */}
                   {isOnlyBoss && (
                     <div>
                       <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Должность (Доступно руководству)</label>
@@ -277,7 +262,6 @@ function Employees() {
                     </div>
                   )}
 
-                  {/* Изменять служебный комментарий разрешено HR и Боссам */}
                   {isHRorBoss && (
                     <div>
                       <label className="block text-xs font-bold text-amber-800 mb-1 uppercase tracking-wide">📌 Служебная заметка / Статус (Отпуска, больничные)</label>
@@ -293,16 +277,14 @@ function Employees() {
                   </div>
                 </div>
               ) : (
-                /* === РЕЖИМ ЧТЕНИЯ (ПРОСМОТРА) === */
                 <>
+                  {/* ИСПРАВЛЕНИЕ: Убрали ячейку "Системная роль" */}
                   <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 text-sm grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-6">
                     <div><span className="block text-xs text-gray-400 font-bold uppercase mb-0.5">Email</span><a href={`mailto:${selectedEmp.email}`} className="font-bold text-blue-600 hover:underline">{selectedEmp.email}</a></div>
                     <div><span className="block text-xs text-gray-400 font-bold uppercase mb-0.5">Телефон</span><span className="font-bold text-gray-800">{selectedEmp.phone_number || 'Не указан'}</span></div>
                     <div><span className="block text-xs text-gray-400 font-bold uppercase mb-0.5">Кабинет / Офис</span><span className="font-bold text-gray-800">{selectedEmp.cabinet || 'Не указан'}</span></div>
-                    <div><span className="block text-xs text-gray-400 font-bold uppercase mb-0.5">Системная роль</span><span className="font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded text-xs inline-block mt-0.5">{selectedEmp.role}</span></div>
                   </div>
 
-                  {/* Блок публичного комментария (hr_note) — его видят ВСЕ пользователи */}
                   <div className="bg-amber-50/60 border border-amber-200 p-4 rounded-2xl">
                     <span className="block text-xs font-black text-amber-800 uppercase tracking-wider mb-2">📌 Служебная заметка / Статус</span>
                     {selectedEmp.hr_note ? (
@@ -314,7 +296,6 @@ function Employees() {
                 </>
               )}
 
-              {/* Отделы сотрудника */}
               <div>
                 <h4 className="font-black text-gray-400 text-xs uppercase tracking-wider mb-2">Подразделения</h4>
                 <div className="flex flex-wrap gap-2">
