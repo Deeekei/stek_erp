@@ -1,6 +1,3 @@
-# stek_erp/docker-compose.yml
-version: '3.8'
-
 services:
   db:
     image: postgres:15-alpine
@@ -17,13 +14,13 @@ services:
     restart: always
 
   backend:
-    # Собираем образ из корневой папки (где лежит наш новый Dockerfile)
     build: . 
     restart: always
+    # ОПТИМИЗАЦИЯ 1: Явно ограничили Gunicorn двумя процессами
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
-             gunicorn --bind 0.0.0.0:8000 Mini_ERP.wsgi:application"
+             gunicorn --workers 2 --bind 0.0.0.0:8000 Mini_ERP.wsgi:application"
     volumes:
       - static_volume:/app/static
       - ./media:/app/media
@@ -38,12 +35,12 @@ services:
       - redis
 
   celery:
-    # Celery тоже использует корневой образ бэкенда
     build: .
     restart: always
-    command: celery -A Mini_ERP worker -l info
+    # ОПТИМИЗАЦИЯ 2: Воркер сбрасывает кэш RAM каждые 40 выполненных задач
+    command: celery -A Mini_ERP worker -l info --max-tasks-per-child=40
     volumes:
-      - media_volume:/app/media
+      - ./media:/app/media  # ИСПРАВЛЕНИЕ: привели к стандарту бэкенда
     environment:
       - DB_HOST=db
       - DB_NAME=erp_db
@@ -59,7 +56,7 @@ services:
     restart: always
     command: celery -A Mini_ERP beat -l info
     volumes:
-      - media_volume:/app/media
+      - ./media:/app/media  # ИСПРАВЛЕНИЕ: привели к стандарту бэкенда
     environment:
       - DB_HOST=db
       - DB_NAME=erp_db
@@ -71,7 +68,6 @@ services:
       - redis
 
   frontend:
-    # Фронтенд собирается из папки frontend
     build: ./frontend
     restart: always
     ports:
@@ -85,4 +81,4 @@ services:
 volumes:
   postgres_data:
   static_volume:
-  media_volume:
+  # media_volume удален за ненадобностью
