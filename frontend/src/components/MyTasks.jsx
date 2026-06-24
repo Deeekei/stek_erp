@@ -13,8 +13,9 @@ function MyTasks() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isFullAccess, setIsFullAccess] = useState(false);
 
-  // === СТЕЙТ ДЛЯ ФИЛЬТРА СОВЕРШЕННЫХ ЗАДАЧ ===
+  // === СТЕЙТЫ ФИЛЬТРОВ ===
   const [hideCompleted, setHideCompleted] = useState(false);
+  const [showOnlyActual, setShowOnlyActual] = useState(false); // <-- НОВЫЙ СТЕЙТ
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -287,14 +288,29 @@ function MyTasks() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* === ВЕРХНЯЯ ШАПКА С КНОПКОЙ ФИЛЬТРА === */}
+      {/* === ВЕРХНЯЯ ШАПКА С КНОПКАМИ ФИЛЬТРОВ === */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-6 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-800">Мои задачи</h1>
           <p className="text-sm text-gray-500 mt-1">Все задачи, в которых вы назначены ответственным или участником</p>
         </div>
-        <div className="flex items-center shrink-0">
-          <label className="flex items-center text-sm font-bold text-gray-600 cursor-pointer select-none bg-white hover:bg-gray-50 border border-gray-200 px-4 py-2 rounded-xl shadow-sm transition-colors w-full sm:w-auto justify-center sm:justify-start">
+
+        {/* ПАНЕЛЬ КНОПОК-ФИЛЬТРОВ */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto shrink-0">
+
+          {/* НОВАЯ КНОПКА: ПОКАЗАТЬ ТОЛЬКО АКТУАЛЬНЫЕ */}
+          <button
+            onClick={() => setShowOnlyActual(!showOnlyActual)}
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-1.5 border
+              ${showOnlyActual 
+                ? 'bg-blue-600 text-white border-blue-600 shadow-md' 
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}
+          >
+            <span>⚡</span> {showOnlyActual ? 'Актуальные задачи' : 'Показать только актуальные'}
+          </button>
+
+          {/* ЧЕКБОКС СКРЫТИЯ ЗАВЕРШЕННЫХ */}
+          <label className="flex items-center text-sm font-bold text-gray-600 cursor-pointer select-none bg-white hover:bg-gray-50 border border-gray-200 px-4 py-2 rounded-xl shadow-sm transition-colors flex-1 sm:flex-none justify-center sm:justify-start">
             <input
               type="checkbox"
               checked={hideCompleted}
@@ -303,6 +319,7 @@ function MyTasks() {
             />
             👁️ Скрыть завершенные
           </label>
+
         </div>
       </div>
 
@@ -313,10 +330,19 @@ function MyTasks() {
               const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
               const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
               const matchAssignee = taskAssigneeId == currentUser?.id || isParticipant;
-              // Умное скрытие выполненных
+
+              // 1. Скрытие выполненных
               const matchCompleted = hideCompleted ? task.status !== 'completed' : true;
 
-              return task.status === column.id && matchAssignee && matchCompleted;
+              // 2. ЛОГИКА ТОЛЬКО АКТУАЛЬНЫХ ЗАДАЧ
+              let matchActual = true;
+              if (showOnlyActual) {
+                const hasStarted = !task.plan_start_date || task.plan_start_date <= today;
+                const isNotFinished = task.status !== 'completed';
+                matchActual = hasStarted && isNotFinished;
+              }
+
+              return task.status === column.id && matchAssignee && matchCompleted && matchActual;
             });
 
             return (
@@ -341,7 +367,7 @@ function MyTasks() {
                                 <h4 className="font-semibold text-gray-800 text-sm mb-1 leading-snug break-words">
                                   {task.is_milestone && <span className="mr-1" title="Веха">🚩</span>}
                                   {task.title}
-                                </h4>
+                               </h4>
                                 <div className="text-[11px] text-blue-600 font-medium mb-2 truncate">
                                   <Link to={`/projects/${task.project}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>📁 {task.project_title || `Проект #${task.project}`}</Link>
                                 </div>
@@ -384,7 +410,6 @@ function MyTasks() {
                       <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
                         <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
 
-                        {/* ЧЕКБОКС ВЕХИ ПРИ РЕДАКТИРОВАНИИ */}
                         <div className="flex items-center mb-4">
                           <input
                             type="checkbox"
