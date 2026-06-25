@@ -15,7 +15,7 @@ function MyTasks() {
 
   // === СТЕЙТЫ ФИЛЬТРОВ ===
   const [hideCompleted, setHideCompleted] = useState(false);
-  const [showOnlyActual, setShowOnlyActual] = useState(false); // <-- НОВЫЙ СТЕЙТ
+  const [showOnlyActual, setShowOnlyActual] = useState(false);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -101,23 +101,50 @@ function MyTasks() {
     const task = tasks.find(t => t.id === taskId);
     const taskProject = projects.find(p => p.id === task.project);
 
+    // Определяем роли пользователя в этой задаче
     const isBoss = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id));
     const isWorker = task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id;
     const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
 
     if (!isBoss && !isWorker && !isParticipant) return alert("Нет прав для действия.");
 
+    // Формируем имя пользователя для автоматических комментариев
+    const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
+
+    // === ЛОГИКА ТОЛЬКО ДЛЯ УЧАСТНИКОВ (НЕ ИСПОЛНИТЕЛЕЙ) ===
     if (isParticipant && !isWorker && !isBoss) {
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-      try {
-        await api.post(`tasks/${taskId}/hide/`, { status: newStatus });
-      } catch (error) {
-        alert("Ошибка сети. Не удалось скрыть задачу.");
-        fetchData();
+      if (newStatus === 'completed') {
+        // Если участник перетащил в "Завершено", мы скрываем задачу и пишем комментарий
+        setTasks(prev => prev.filter(t => t.id !== taskId));
+        try {
+          await api.post(`tasks/${taskId}/hide/`, { status: newStatus });
+          await api.post(`tasks/${taskId}/add_comment/`, { text: `✅ Участник ${fullName} выполнил свою часть работы.` });
+        } catch (error) {
+          alert("Ошибка сети. Не удалось скрыть задачу.");
+          fetchData();
+        }
+        return;
+      } else if (newStatus === 'in_progress') {
+        // Если участник взял задачу в работу, мы оставляем ее на доске и просто пишем комментарий
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+        try {
+          await api.patch(`tasks/${taskId}/`, { status: newStatus });
+          const commentRes = await api.post(`tasks/${taskId}/add_comment/`, { text: `⚙️ Участник ${fullName} принял свою часть работы.` });
+          setTasks(prev => prev.map(t => t.id === taskId ? { ...t, comments: [...(t.comments || []), commentRes.data] } : t));
+        } catch (error) {
+          alert("Ошибка смены статуса.");
+          fetchData();
+        }
+        return;
+      } else {
+        // Если задача возвращена в "Новые"
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+        try { await api.patch(`tasks/${taskId}/`, { status: newStatus }); } catch (error) { fetchData(); }
+        return;
       }
-      return;
     }
 
+    // === ЛОГИКА ДЛЯ ИСПОЛНИТЕЛЕЙ И РУКОВОДИТЕЛЕЙ ===
     const isOverdue = task.plan_end_date && task.plan_end_date < today;
     if (newStatus === 'completed' && isOverdue) {
       setTaskToComplete(task);
@@ -131,7 +158,6 @@ function MyTasks() {
     try {
       await api.patch(`tasks/${taskId}/`, { status: newStatus });
 
-      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
       let autoText = '';
       if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
       if (newStatus === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
@@ -298,7 +324,6 @@ function MyTasks() {
         {/* ПАНЕЛЬ КНОПОК-ФИЛЬТРОВ */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto shrink-0">
 
-          {/* НОВАЯ КНОПКА: ПОКАЗАТЬ ТОЛЬКО АКТУАЛЬНЫЕ */}
           <button
             onClick={() => setShowOnlyActual(!showOnlyActual)}
             className={`flex-1 sm:flex-none px-4 py-2 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-1.5 border
@@ -309,7 +334,6 @@ function MyTasks() {
             <span>⚡</span> {showOnlyActual ? 'Актуальные задачи' : 'Показать только актуальные'}
           </button>
 
-          {/* ЧЕКБОКС СКРЫТИЯ ЗАВЕРШЕННЫХ */}
           <label className="flex items-center text-sm font-bold text-gray-600 cursor-pointer select-none bg-white hover:bg-gray-50 border border-gray-200 px-4 py-2 rounded-xl shadow-sm transition-colors flex-1 sm:flex-none justify-center sm:justify-start">
             <input
               type="checkbox"
@@ -331,10 +355,8 @@ function MyTasks() {
               const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
               const matchAssignee = taskAssigneeId == currentUser?.id || isParticipant;
 
-              // 1. Скрытие выполненных
               const matchCompleted = hideCompleted ? task.status !== 'completed' : true;
 
-              // 2. ЛОГИКА ТОЛЬКО АКТУАЛЬНЫХ ЗАДАЧ
               let matchActual = true;
               if (showOnlyActual) {
                 const hasStarted = !task.plan_start_date || task.plan_start_date <= today;
