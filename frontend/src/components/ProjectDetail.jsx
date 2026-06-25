@@ -73,7 +73,7 @@ function ProjectDetail() {
   const [editFormData, setEditFormData] = useState({});
   const [newCommentText, setNewCommentText] = useState('');
 
-  // === СТЕЙТЫ ДЛЯ МОДАЛКИ ДУБЛИРОВАНИЯ (КАК НА ДАШБОРДЕ) ===
+  // === СТЕЙТЫ ДЛЯ МОДАЛКИ ДУБЛИРОВАНИЯ ===
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [allProjectsList, setAllProjectsList] = useState([]);
   const [dupTaskTitle, setDupTaskTitle] = useState('');
@@ -559,15 +559,14 @@ function ProjectDetail() {
     } catch (error) { alert("Ошибка удаления."); }
   };
 
-  // === ЛОГИКА ДУБЛИРОВАНИЯ (ПОДГОТОВКА ПОЛЕЙ И ОТКРЫТИЕ МОДАЛКИ) ===
+  // === ЛОГИКА ДУБЛИРОВАНИЯ ===
   const handleOpenDuplicateModal = async () => {
     if (!editingTask) return;
 
-    // 1. Предзаполняем стейт дубликата данными текущей задачи
     const assigneeId = editingTask.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id : editingTask.assignee;
     setDupTaskTitle(`${editingTask.title} (Копия)`);
     setDupTaskDescription(editingTask.description || '');
-    setDupTaskStatus('new'); // Копия всегда рождается в статусе "Новая"
+    setDupTaskStatus('new');
     setDupTaskPriority(editingTask.priority || 'medium');
     setDupTaskPlanStart(editingTask.plan_start_date || '');
     setDupTaskPlanEnd(editingTask.plan_end_date || '');
@@ -577,20 +576,17 @@ function ProjectDetail() {
     setDupTaskIsMilestone(editingTask.is_milestone || false);
     setDupTaskFiles([]);
 
-    // 2. Подгружаем полный список проектов для селекта, если он еще пустой
     if (allProjectsList.length === 0) {
       try {
         const resP = await api.get('projects/');
-        setAllProjectsList(resRes => resP.data.results || resP.data);
+        setAllProjectsList(resP.data.results || resP.data);
       } catch (e) { console.error("Ошибка загрузки проектов:", e); }
     }
 
-    // 3. Закрываем окно просмотра и открываем форму создания копии
     setIsEditModalOpen(false);
     setIsDuplicateModalOpen(true);
   };
 
-  // === ОТПРАВКА ДУБЛИКАТА НА БЭКЕНД ===
   const handleDuplicateTaskSubmit = async (e) => {
     e.preventDefault();
     if (!dupTaskProject) return alert("Пожалуйста, выберите проект для копии задачи!");
@@ -612,7 +608,6 @@ function ProjectDetail() {
       const response = await api.post('tasks/', payload);
       let createdTask = response.data;
 
-      // Если прикрепили новые файлы
       if (dupTaskFiles.length > 0) {
         for (const file of dupTaskFiles) {
           const formData = new FormData(); formData.append('file', file);
@@ -620,7 +615,6 @@ function ProjectDetail() {
         }
       }
 
-      // Если создали копию внутри текущего проекта — сразу обновляем список задач на экране
       if (parseInt(dupTaskProject) === parseInt(id)) {
         fetchTasks();
       }
@@ -833,8 +827,9 @@ function ProjectDetail() {
         </div>
       )}
 
+      {/* 1. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
       {isProjectEditModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsProjectEditModalOpen(false); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsProjectEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Изменить проект</h3>
             <form onSubmit={handleUpdateProject}>
@@ -846,8 +841,9 @@ function ProjectDetail() {
       )}
 
       {/* === МОДАЛКА ПРОСМОТРА И РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
+      {/* 2. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
       {isEditModalOpen && editingTask && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1200px] h-[90vh] flex flex-col overflow-hidden">
             <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
               {canEditAll ? (
@@ -859,7 +855,6 @@ function ProjectDetail() {
                         <span className="text-xs font-bold px-2 py-1 bg-blue-100 text-blue-800 rounded uppercase tracking-wide">📁 Проект: {project?.title}</span>
                       </div>
 
-                      {/* === КНОПКИ ДУБЛИРОВАНИЯ И УДАЛЕНИЯ === */}
                       <div className="flex items-center gap-2">
                         <button onClick={handleOpenDuplicateModal} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1">📑 Дублировать</button>
                         <button onClick={() => handleQuickDelete(editingTask.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap">Удалить</button>
@@ -957,7 +952,6 @@ function ProjectDetail() {
                         </span>
                       </div>
 
-                      {/* === КНОПКА ДУБЛИРОВАНИЯ ДЛЯ ОБЫЧНЫХ УЧАСТНИКОВ === */}
                       <button onClick={handleOpenDuplicateModal} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1">📑 Дублировать</button>
                     </div>
 
@@ -1063,9 +1057,10 @@ function ProjectDetail() {
         </div>
       )}
 
-      {/* === НОВАЯ МОДАЛКА СОЗДАНИЯ КОПИИ ЗАДАЧИ (ИДЕНТИЧНА ДАШБОРДУ) === */}
+      {/* === МОДАЛКА СОЗДАНИЯ КОПИИ ЗАДАЧИ === */}
+      {/* 3. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
       {isDuplicateModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsDuplicateModalOpen(false); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsDuplicateModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">Создание копии задачи</h3>
             <form onSubmit={handleDuplicateTaskSubmit} className="space-y-4 sm:space-y-6">
@@ -1104,7 +1099,7 @@ function ProjectDetail() {
 
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == dupTaskAssignee) || null} onChange={(opt) => setDupTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                 <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => dupTaskParticipants.includes(o.value))} onChange={(selected) => setDupTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label><select value={dupTaskPriority} onChange={(e) => setDupTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
+                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Criticality</label><select value={dupTaskPriority} onChange={(e) => setDupTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-4 border border-gray-100">
                 <div><label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План)</label><input type="date" value={dupTaskPlanStart} onChange={(e) => setDupTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" /></div>
@@ -1121,8 +1116,9 @@ function ProjectDetail() {
         </div>
       )}
 
+      {/* 4. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
       {isCompletionModalOpen && taskToComplete && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
             <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
             <form onSubmit={handleConfirmCompletion}>
@@ -1134,8 +1130,9 @@ function ProjectDetail() {
       )}
 
       {/* --- МОДАЛКА СОЗДАНИЯ ЗАДАЧИ --- */}
+      {/* 5. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
       {isTaskModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); setNewTaskParticipants([]); setNewTaskIsMilestone(false); } }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); setNewTaskParticipants([]); setNewTaskIsMilestone(false); } }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">{newTaskParent ? 'Новая подзадача' : 'Новая задача'}</h3>
             <form onSubmit={handleCreateTask} className="space-y-4 sm:space-y-6">
