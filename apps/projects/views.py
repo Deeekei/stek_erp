@@ -963,20 +963,38 @@ class VacationViewSet(viewsets.ModelViewSet):
         created_count = 0
         not_found_users = []
         double_users = []
+        bad_dates = []
+
+        # Внутренняя умная функция перевода "02.02.26" -> "2026-02-02"
+        def parse_date(d_str):
+            d_str = d_str.strip().replace('/', '.')
+            for fmt in ('%d.%m.%Y', '%d.%m.%y', '%Y-%m-%d'):
+                try:
+                    return datetime.strptime(d_str, fmt).strftime('%Y-%m-%d')
+                except ValueError:
+                    continue
+            return None
 
         for row in reader:
-            # Нам нужны как минимум первые 4 колонки: Орг, ФИО, Начало, Окончание
             if not row or len(row) < 4:
                 continue
 
             fio = row[1].strip()
-            start_str = row[2].strip()
-            end_str = row[3].strip()
+            raw_start = row[2].strip()
+            raw_end = row[3].strip()
 
-            if not fio or not start_str or not end_str:
+            if not fio or not raw_start or not raw_end:
                 continue
 
-            # Парсим "Юртов Юрий Юрьевич" -> Фамилия="Юртов", Имя="Юрий"
+            # Преобразуем даты
+            start_str = parse_date(raw_start)
+            end_str = parse_date(raw_end)
+
+            if not start_str or not end_str:
+                bad_dates.append(f"{fio} ({raw_start} - {raw_end})")
+                continue
+
+            # Разбираем ФИО
             parts = fio.split()
             if len(parts) < 2:
                 not_found_users.append(fio)
@@ -985,7 +1003,6 @@ class VacationViewSet(viewsets.ModelViewSet):
             last_name = parts[0]
             first_name = parts[1]
 
-            # Ищем пользователя без учета регистра букв
             matched = User.objects.filter(
                 last_name__iexact=last_name,
                 first_name__iexact=first_name
@@ -1000,7 +1017,6 @@ class VacationViewSet(viewsets.ModelViewSet):
 
             user_obj = matched.first()
 
-            # Записываем в базу
             Vacation.objects.create(
                 user=user_obj,
                 start_date=start_str,
@@ -1008,8 +1024,14 @@ class VacationViewSet(viewsets.ModelViewSet):
             )
             created_count += 1
 
-        return Response({
-            "message": f"Успешно обработано и добавлено {created_count} отпусков.",
+        response_data = {
+            "message": f"Успешно импортировано {created_count} отпусков!",
             "not_found": not_found_users,
             "doubles": double_users
-        }, status=200)
+        }
+
+        # Если кадровик где-то ввел совсем космическую дату вроде "32.13.26"
+        if bad_dates:
+            response_data["bad_dates"] = bad_dates
+
+        return Response(response_data, status=200)
