@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import api from '../api';
 
 function Employees() {
@@ -10,7 +10,7 @@ function Employees() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDept, setSelectedDept] = useState('');
 
-  // Модалка
+  // Модалка профиля
   const [selectedEmp, setSelectedEmp] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
 
@@ -22,6 +22,10 @@ function Employees() {
   const [editPosition, setEditPosition] = useState('');
   const [hrNoteText, setHrNoteText] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // === СТЕЙТЫ ДЛЯ ИМПОРТА ОТПУСКОВ ===
+  const vacationInputRef = useRef(null);
+  const [uploadingVacations, setUploadingVacations] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -68,6 +72,7 @@ function Employees() {
 
   const isMe = currentUser && selectedEmp && currentUser.id === selectedEmp.id;
 
+  // Проверка на Босса или Отдел кадров
   const isHRorBoss = currentUser && (
     currentUser.role === 'admin' ||
     currentUser.role === 'director' ||
@@ -76,6 +81,43 @@ function Employees() {
   );
 
   const isOnlyBoss = currentUser && (currentUser.role === 'admin' || currentUser.role === 'director' || currentUser.is_superuser);
+
+  // === ОБРАБОТЧИК ЗАГРУЗКИ ФАЙЛА ОТПУСКОВ ===
+  const handleUploadVacations = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      return alert("Пожалуйста, выберите файл в формате .csv");
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    setUploadingVacations(true);
+    try {
+      const res = await api.post('vacations/import_csv/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      let msg = res.data.message || "График отпусков успешно импортирован!";
+
+      if (res.data.not_found?.length > 0) {
+        msg += `\n\n⚠️ Не найдены в базе (проверьте написание ФИО):\n— ` + res.data.not_found.join('\n— ');
+      }
+      if (res.data.doubles?.length > 0) {
+        msg += `\n\n⚠️ Найдено несколько тезок (привяжите их вручную):\n— ` + res.data.doubles.join('\n— ');
+      }
+
+      alert(msg);
+    } catch (err) {
+      console.error(err);
+      alert("Ошибка при загрузке файла. Убедитесь, что бэкенд запущен и структура CSV верна.");
+    } finally {
+      setUploadingVacations(false);
+      e.target.value = ''; // Сбрасываем инпут, чтобы можно было выбрать этот же файл повторно
+    }
+  };
 
   const handleCardClick = (emp) => {
     setSelectedEmp(emp);
@@ -124,9 +166,33 @@ function Employees() {
   return (
     <div className="h-full flex flex-col">
 
-      <div className="mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Сотрудники</h1>
-        <p className="text-sm text-gray-500 mt-1">Контакты, кабинеты и рабочие статусы коллег ({filteredEmployees.length} чел.)</p>
+      {/* === ВЕРХНЯЯ ШАПКА С КНОПКОЙ ИМПОРТА === */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Сотрудники</h1>
+          <p className="text-sm text-gray-500 mt-1">Контакты, кабинеты и рабочие статусы коллег ({filteredEmployees.length} чел.)</p>
+        </div>
+
+        {/* КНОПКА ЗАГРУЗКИ ОТПУСКОВ (ВИДНА ТОЛЬКО АДМИНУ И ОТДЕЛУ КАДРОВ) */}
+        {isHRorBoss && (
+          <div className="w-full sm:w-auto">
+            <input
+              type="file"
+              accept=".csv"
+              ref={vacationInputRef}
+              onChange={handleUploadVacations}
+              className="hidden"
+            />
+            <button
+              onClick={() => vacationInputRef.current?.click()}
+              disabled={uploadingVacations}
+              className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-sm shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <span className="text-base">🌴</span>
+              {uploadingVacations ? "Импорт данных..." : "Загрузить график отпусков"}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 mb-6 flex flex-col sm:flex-row gap-3">
@@ -216,7 +282,7 @@ function Employees() {
 
       {/* === МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ПРОФИЛЯ === */}
       {selectedEmp && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) setSelectedEmp(null); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200] p-4 overflow-y-auto" onMouseDown={(e) => { if (e.target === e.currentTarget) setSelectedEmp(null); }}>
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden relative animate-fade-in my-8">
 
             <div className="bg-slate-900 text-white p-6 sm:p-8 relative">
@@ -278,7 +344,6 @@ function Employees() {
                 </div>
               ) : (
                 <>
-                  {/* ИСПРАВЛЕНИЕ: Убрали ячейку "Системная роль" */}
                   <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 text-sm grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-6">
                     <div><span className="block text-xs text-gray-400 font-bold uppercase mb-0.5">Email</span><a href={`mailto:${selectedEmp.email}`} className="font-bold text-blue-600 hover:underline">{selectedEmp.email}</a></div>
                     <div><span className="block text-xs text-gray-400 font-bold uppercase mb-0.5">Телефон</span><span className="font-bold text-gray-800">{selectedEmp.phone_number || 'Не указан'}</span></div>
@@ -290,7 +355,7 @@ function Employees() {
                     {selectedEmp.hr_note ? (
                       <p className="text-gray-800 text-sm font-semibold whitespace-pre-wrap leading-relaxed">{selectedEmp.hr_note}</p>
                     ) : (
-                      <p className="text-gray-400 text-xs italic font-medium">Дополнительных отметок (отпуска, больничные) нет.</p>
+                      <p className="text-gray-400 text-xs italic font-medium">Дополнительных отметок нет.</p>
                     )}
                   </div>
                 </>

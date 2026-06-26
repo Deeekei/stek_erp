@@ -16,7 +16,7 @@ from django.http import HttpResponse
 from .tasks import send_notification_email
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions
-from .models import Attachment, News
+from .models import Attachment, News, Vacation
 from .serializers import AttachmentSerializer, NewsSerializer
 from firebase_admin import messaging
 import xml.etree.ElementTree as ET
@@ -939,3 +939,77 @@ class NotificationViewSet(viewsets.ModelViewSet):
             FCMDevice.objects.get_or_create(user=request.user, registration_id=token)
             return Response({'status': 'Токен успешно сохранен'}, status=status.HTTP_200_OK)
         return Response({'error': 'Токен не предоставлен'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class VacationViewSet(viewsets.ModelViewSet):
+    queryset = Vacation.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['post'])
+    def import_csv(self, request):
+        csv_file = request.FILES.get('file')
+        if not csv_file:
+            return Response({"error": "Файл не предоставлен"}, status=400)
+
+        file_bytes = csv_file.read()
+        try:
+            decoded = file_bytes.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            decoded = file_bytes.decode('windows-1251')
+
+        reader = csv.reader(io.StringIO(decoded), delimiter=',')
+        next(reader, None)  # Пропускаем строку заголовков
+
+        created_count = 0
+        not_found_users = []
+        double_users = []
+
+        for row in reader:
+            # Нам нужны как минимум первые 4 колонки: Орг, ФИО, Начало, Окончание
+            if not row or len(row) < 4:
+                continue
+
+            fio = row[1].strip()
+            start_str = row[2].strip()
+            end_str = row[3].strip()
+
+            if not fio or not start_str or not end_str:
+                continue
+
+            # Парсим "Юртов Юрий Юрьевич" -> Фамилия="Юртов", Имя="Юрий"
+            parts = fio.split()
+            if len(parts) < 2:
+                not_found_users.append(fio)
+                continue
+
+            last_name = parts[0]
+            first_name = parts[1]
+
+            # Ищем пользователя без учета регистра букв
+            matched = User.objects.filter(
+                last_name__iexact=last_name,
+                first_name__iexact=first_name
+            )
+
+            if matched.count() == 0:
+                not_found_users.append(fio)
+                continue
+            elif matched.count() > 1:
+                double_users.append(fio)
+                continue
+
+            user_obj = matched.first()
+
+            # Записываем в базу
+            Vacation.objects.create(
+                user=user_obj,
+                start_date=start_str,
+                end_date=end_str
+            )
+            created_count += 1
+
+        return Response({
+            "message": f"Успешно обработано и добавлено {created_count} отпусков.",
+            "not_found": not_found_users,
+            "doubles": double_users
+        }, status=200)

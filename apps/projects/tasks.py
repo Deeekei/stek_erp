@@ -3,7 +3,7 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from .models import Task
+from .models import Task, Vacation
 
 
 @shared_task
@@ -67,3 +67,33 @@ def check_deadlines_and_notify():
                 notify_user(task.assignee, title, message, link=task_link)
             except Exception as e:
                 print(f"Ошибка при отправке авто-уведомления для задачи ID {task.id}: {e}")
+
+
+@shared_task
+def notify_upcoming_vacations():
+    # Ровно через 10 дней от текущей секунды
+    target_date = timezone.now().date() + timedelta(days=10)
+
+    # Ищем отпуска, которые начнутся в эту дату, и о которых мы еще не писали
+    vacations = Vacation.objects.filter(
+        start_date=target_date,
+        is_notified_10_days=False
+    ).select_related('user')
+
+    for vac in vacations:
+        # ХИТРОСТЬ ПИТОНА: импортируем notify_user ПРЯМО ВНУТРИ функции,
+        # чтобы обойти ошибку перекрестного импорта (Circular Import)
+        from .views import notify_user
+
+        start_formatted = vac.start_date.strftime('%d.%m.%Y')
+
+        notify_user(
+            user=vac.user,
+            title="🌴 Приближается отпуск!",
+            message=f"Напоминаем, что через 10 дней ({start_formatted}) у вас начинается отпуск.\nПожалуйста, подойдите в отдел кадров для подписания документов.",
+            link="/profile"  # Ссылка куда перекинет клик по пушу
+        )
+
+        # Ставим клеймо, что письмо отправлено
+        vac.is_notified_10_days = True
+        vac.save(update_fields=['is_notified_10_days'])

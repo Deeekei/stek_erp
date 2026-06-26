@@ -176,3 +176,25 @@ class FCMDevice(models.Model):
 
     def __str__(self):
         return f"Устройство {self.user.username} (#{self.id})"
+
+
+class Vacation(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='vacations',
+        verbose_name='Сотрудник'
+    )
+    start_date = models.DateField('Дата начала')
+    end_date = models.DateField('Дата окончания')
+
+    # Флаг-предохранитель от повторных уведомлений (чтобы не спамить)
+    is_notified_10_days = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = 'Отпуск'
+        verbose_name_plural = 'Отпуска'
+        ordering = ['start_date']
+
+    def __str__(self):
+        return f"{self.user} ({self.start_date} -> {self.end_date})"

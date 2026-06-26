@@ -166,6 +166,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.projects.tasks.check_deadlines_and_notify',
         'schedule': crontab(hour=7, minute=0),
     },
+    'check-vacations-every-morning': {
+        'task': 'apps.projects.tasks.notify_upcoming_vacations', # Укажи свой точный путь к файлу
+        'schedule': crontab(hour=9, minute=0), # Запуск каждый день строго в 9:00 утра
+    },
 }
 
 CELERY_TIMEZONE = 'Europe/Moscow'
