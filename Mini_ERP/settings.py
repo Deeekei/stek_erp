@@ -146,7 +146,7 @@ EMAIL_HOST = 'smtp.yandex.ru'
 EMAIL_PORT = 465
 EMAIL_USE_SSL = True
 EMAIL_USE_TLS = False
-
+EMAIL_TIMEOUT = 10
 EMAIL_HOST_USER = 'stroitekufa@yandex.com'
 EMAIL_HOST_PASSWORD = 'bpbmkmjsfgoasziv'
 
