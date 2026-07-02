@@ -123,33 +123,33 @@ class CanEditTaskPermission(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
 
-        # 2. ИСКЛЮЧЕНИЕ: Добавление комментария и скрытие разрешено всем авторизованным
-        if view.action in ['add_comment', 'hide']:
+        # 2. ИСКЛЮЧЕНИЯ ДЛЯ ВСЕХ: Комментарии и файлы разрешены ВООБЩЕ ЛЮБОМУ пользователю
+        if view.action in ['add_comment', 'upload_files']:
             return True
 
-        # === НИЖЕ ИДУТ ПРАВИЛА ДЛЯ РЕДАКТИРОВАНИЯ САМОЙ ЗАДАЧИ ===
+        # === ПРОВЕРКА РОЛЕЙ ===
+        is_boss = (
+            getattr(request.user, 'role', '') in ['admin', 'director'] or
+            request.user.is_superuser or
+            (obj.project and obj.project.manager == request.user) or
+            (obj.project and obj.project.visibility == 'selected' and obj.project.allowed_users.filter(id=request.user.id).exists()) or
+            (obj.project and obj.project.visibility == 'all' and getattr(request.user, 'role', '') == 'manager')
+        )
+        is_assignee = (obj.assignee == request.user)
+        is_participant = obj.participants.filter(id=request.user.id).exists()
 
-        # 3. Админы и директора могут редактировать всё
-        if getattr(request.user, 'role', '') in ['admin', 'director'] or request.user.is_superuser:
+        # 3. Скрытие задачи доступно только причастным (чтобы левый юзер не скрыл чужую задачу)
+        if view.action == 'hide':
+            if is_boss or is_assignee or is_participant:
+                return True
+            return False
+
+        # === ПРАВИЛА ДЛЯ РЕДАКТИРОВАНИЯ САМОЙ ЗАДАЧИ (Сроки, статусы, названия) ===
+        # 4. Боссы и Исполнитель могут редактировать саму задачу
+        if is_boss or is_assignee:
             return True
 
-        # 4. Менеджер проекта может редактировать задачи своего проекта
-        if obj.project and obj.project.manager == request.user:
-            return True
-
-        # 🌟 Если проект ограниченный, и юзер входит в круг лиц — ему МОЖНО редактировать параметры/сроки
-        if obj.project and obj.project.visibility == 'selected' and obj.project.allowed_users.filter(
-                id=request.user.id).exists():
-            return True
-
-        if obj.project and obj.project.visibility == 'all' and getattr(request.user, 'role', '') == 'manager':
-            return True
-
-        # 5. ИСПОЛНИТЕЛЬ задачи может её редактировать (например, менять статус)
-        if obj.assignee == request.user:
-            return True
-
-        # Всем остальным редактировать задачу запрещено
+        # Всем остальным редактировать саму задачу запрещено
         return False
 
 

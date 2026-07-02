@@ -61,6 +61,7 @@ class Task(models.Model):
         ('new', 'Новая'),
         ('in_progress', 'В работе'),
         ('review', 'На проверке'),
+        ('delayed', 'В отсрочке'),
         ('completed', 'Завершена'),
         ('cancelled', 'Отменена'),
     )

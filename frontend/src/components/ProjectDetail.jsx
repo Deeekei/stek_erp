@@ -641,7 +641,7 @@ function ProjectDetail() {
   const isParticipantTask = (editingTask?.participants || []).includes(currentUser?.id);
 
   const canEditAll = isBossAll;
-  const canInteract = isBossAll || isWorkerTask || isParticipantTask;
+  const canInteract = true;
 
   const getPriorityInfo = (priority) => {
     switch(priority) {
@@ -660,6 +660,7 @@ function ProjectDetail() {
   const kanbanColumns = [
     { id: 'new', title: 'Новые', color: 'border-gray-200 bg-gray-50' },
     { id: 'in_progress', title: 'В работе', color: 'border-blue-200 bg-blue-50' },
+    { id: 'delayed', title: 'В отсрочке', color: 'border-orange-200 bg-orange-50' },
     { id: 'completed', title: 'Завершены', color: 'border-green-200 bg-green-50' }
   ];
 
@@ -760,7 +761,7 @@ function ProjectDetail() {
                     {(provided) => (
                       <div ref={provided.innerRef} {...provided.droppableProps} className="p-2 sm:p-3 flex-1 overflow-y-auto min-h-[200px]">
                         {columnTasks.map((task, index) => {
-                          const isOverdue = task.plan_end_date < today && task.status !== 'completed';
+                          const isOverdue = task.plan_end_date < today && task.status !== 'completed' && task.status !== 'delayed';
                           return (
                             <Draggable key={task.id.toString()} draggableId={task.id.toString()} index={index}>
                               {(provided) => (
@@ -1018,7 +1019,7 @@ function ProjectDetail() {
                       {isWorkerTask ? (
                         <form id="editForm" onSubmit={handleUpdateTask}>
                           <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-4 py-2 border border-blue-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-blue-900 font-semibold cursor-pointer">
-                            <option value="new">🆕 Новая</option><option value="in_progress">⚙️ В работе</option><option value="completed">✅ Завершена</option>
+                            <option value="new">🆕 Новая</option><option value="in_progress">⚙️ В работе</option><option value="delayed">⏸️ В отсрочке</option><option value="completed">✅ Завершена</option>
                           </select>
                         </form>
                       ) : (

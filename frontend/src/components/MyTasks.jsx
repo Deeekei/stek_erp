@@ -33,7 +33,7 @@ function MyTasks() {
   const [isFullAccess, setIsFullAccess] = useState(false);
 
   // === СТЕЙТЫ ОТОБРАЖЕНИЯ И ФИЛЬТРОВ ===
-  const [viewMode, setViewMode] = useState('kanban'); // 'kanban' или 'calendar'
+  const [viewMode, setViewMode] = useState('kanban'); // 'kanban', 'list' или 'calendar'
   const [searchQuery, setSearchQuery] = useState('');
   const [hideCompleted, setHideCompleted] = useState(false);
   const [showOnlyActual, setShowOnlyActual] = useState(false);
@@ -114,7 +114,7 @@ function MyTasks() {
 
   const projectOptions = useMemo(() => projects.map(p => ({ value: p.id, label: p.title })), [projects]);
 
-  // === ФИЛЬТРАЦИЯ ЗАДАЧ (ДЛЯ КАНБАНА И КАЛЕНДАРЯ) ===
+  // === ФИЛЬТРАЦИЯ ЗАДАЧ (ДЛЯ ВСЕХ ВИДОВ) ===
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
@@ -366,8 +366,9 @@ function MyTasks() {
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
   const isParticipantTask = checkIsParticipant(editingTask?.participants, currentUser?.id);
 
+  // Обрати внимание: теперь canInteract разрешает всем писать комменты и грузить файлы
   const canEditAll = isBossAll;
-  const canInteract = isBossAll || isWorkerTask || isParticipantTask;
+  const canInteract = true;
 
   const getPriorityInfo = (priority) => {
     switch(priority) {
@@ -381,6 +382,7 @@ function MyTasks() {
   const kanbanColumns = [
     { id: 'new', title: 'Новые', color: 'border-gray-200 bg-gray-50' },
     { id: 'in_progress', title: 'В работе', color: 'border-blue-200 bg-blue-50' },
+    { id: 'delayed', title: 'В отсрочке', color: 'border-orange-200 bg-orange-50' },
     { id: 'completed', title: 'Завершены', color: 'border-green-200 bg-green-50' }
   ];
 
@@ -396,10 +398,14 @@ function MyTasks() {
         </div>
 
         <div className="flex flex-col sm:flex-row flex-wrap items-center gap-3 w-full xl:w-auto shrink-0">
+
+          {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДОВ (Канбан / Список / Календарь) */}
           <div className="flex bg-gray-100 p-1 rounded-xl shadow-inner border border-gray-200 w-full sm:w-auto">
             <button onClick={() => setViewMode('kanban')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Канбан</button>
+            <button onClick={() => setViewMode('list')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Список</button>
             <button onClick={() => setViewMode('calendar')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Календарь</button>
           </div>
+
           <div className="w-full sm:w-64 relative flex-1 sm:flex-none">
             <span className="absolute left-3 top-2.5 text-gray-400">🔍</span>
             <input type="text" placeholder="Поиск по названию..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-all" />
@@ -411,8 +417,10 @@ function MyTasks() {
         </div>
       </div>
 
-      {/* === ОСНОВНАЯ ОБЛАСТЬ === */}
-      {viewMode === 'kanban' ? (
+      {/* === ОСНОВНАЯ ОБЛАСТЬ (РЕНДЕРИНГ В ЗАВИСИМОСТИ ОТ viewMode) === */}
+
+      {/* 1. ВИД: КАНБАН ДОСКА */}
+      {viewMode === 'kanban' && (
         <DragDropContext onDragEnd={handleDragEnd}>
           <div className="flex gap-6 overflow-x-auto pb-4 flex-1 items-start">
             {kanbanColumns.map(column => {
@@ -426,7 +434,7 @@ function MyTasks() {
                     {(provided) => (
                       <div ref={provided.innerRef} {...provided.droppableProps} className="p-3 flex-1 overflow-y-auto min-h-[200px]">
                         {columnTasks.map((task, index) => {
-                          const isOverdue = task.plan_end_date < today && task.status !== 'completed';
+                          const isOverdue = task.plan_end_date < today && task.status !== 'completed' && task.status !== 'delayed';
                           const prioInfo = getPriorityInfo(task.priority);
                           return (
                             <Draggable key={task.id.toString()} draggableId={task.id.toString()} index={index}>
@@ -450,7 +458,91 @@ function MyTasks() {
             })}
           </div>
         </DragDropContext>
-      ) : (
+      )}
+
+      {/* 2. ВИД: СПИСОК (ТАБЛИЦА) */}
+      {viewMode === 'list' && (
+        <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+          <div className="overflow-x-auto flex-1">
+            <table className="w-full text-left border-collapse min-w-[800px]">
+              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 text-xs uppercase font-bold sticky top-0 z-10">
+                <tr>
+                  <th className="px-5 py-4 w-16">№</th>
+                  <th className="px-5 py-4 w-32">Приоритет</th>
+                  <th className="px-5 py-4 min-w-[250px]">Название</th>
+                  <th className="px-5 py-4 w-48">Проект</th>
+                  <th className="px-5 py-4 w-36">Статус</th>
+                  <th className="px-5 py-4 w-32">Дедлайн</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm">
+                {filteredTasks.length > 0 ? (
+                  filteredTasks.map(task => {
+                    const prioInfo = getPriorityInfo(task.priority);
+                    const isOverdue = task.plan_end_date && task.plan_end_date < today && task.status !== 'completed';
+                    const taskProjectTitle = task.project_title || projects.find(p => p.id === task.project)?.title || `Проект #${task.project}`;
+
+                    return (
+                      <tr
+                        key={task.id}
+                        onClick={() => handleTaskClick(task)}
+                        className={`border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors ${isOverdue ? 'bg-red-50/40 hover:bg-red-100/50' : ''}`}
+                      >
+                        <td className="px-5 py-4 text-gray-400 font-medium">#{task.id}</td>
+                        <td className="px-5 py-4">
+                          <span className={`px-2 py-1 text-[10px] uppercase rounded font-bold whitespace-nowrap ${prioInfo.color}`}>
+                            {prioInfo.icon} {prioInfo.label}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="font-semibold text-gray-800 break-words">
+                            {task.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
+                            {task.title}
+                          </div>
+                          {task.comments?.length > 0 && (
+                            <div className="text-xs text-gray-400 mt-1 font-medium flex items-center gap-1">
+                              💬 {task.comments.length} комментариев
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-5 py-4">
+                          <Link
+                            to={`/projects/${task.project}`}
+                            className="text-blue-600 font-medium text-xs hover:underline truncate block"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            📁 {taskProjectTitle}
+                          </Link>
+                        </td>
+                        <td className="px-5 py-4">
+                          {task.status === 'new' && <span className="text-gray-600 font-bold text-[11px] uppercase tracking-wider bg-gray-100 px-2.5 py-1 rounded-md">Новая</span>}
+                          {task.status === 'in_progress' && <span className="text-blue-600 font-bold text-[11px] uppercase tracking-wider bg-blue-100 px-2.5 py-1 rounded-md">В работе</span>}
+                          {task.status === 'delayed' && <span className="text-orange-600 font-bold text-[11px] uppercase tracking-wider bg-orange-100 px-2.5 py-1 rounded-md">В отсрочке</span>}
+                          {task.status === 'completed' && <span className="text-green-600 font-bold text-[11px] uppercase tracking-wider bg-green-100 px-2.5 py-1 rounded-md">Завершена</span>}
+                        </td>
+                        <td className={`px-5 py-4 font-medium whitespace-nowrap ${isOverdue ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
+                          {isOverdue && <span className="mr-1">⏳</span>}
+                          {task.plan_end_date || '—'}
+                        </td>
+                      </tr>
+                    )
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan="6" className="px-5 py-12 text-center text-gray-400 font-medium text-base">
+                      <span className="text-4xl block mb-2">📭</span>
+                      Подходящих задач не найдено
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 3. ВИД: КАЛЕНДАРЬ */}
+      {viewMode === 'calendar' && (
         <div className="flex-1 bg-white p-4 rounded-xl shadow-sm border border-gray-200 min-h-[600px]">
           <Calendar
             localizer={localizer}
@@ -577,7 +669,7 @@ function MyTasks() {
                       {isWorkerTask ? (
                         <form id="editForm" onSubmit={handleUpdateTask}>
                           <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-4 py-2 border border-blue-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-blue-900 font-semibold cursor-pointer">
-                            <option value="new">🆕 Новая</option><option value="in_progress">⚙️ В работе</option><option value="completed">✅ Завершена</option>
+                            <option value="new">🆕 Новая</option><option value="in_progress">⚙️ В работе</option><option value="delayed">⏸️ В отсрочке</option><option value="completed">✅ Завершена</option>
                           </select>
                         </form>
                       ) : (
