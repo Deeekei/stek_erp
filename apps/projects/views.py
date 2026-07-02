@@ -142,6 +142,9 @@ class CanEditTaskPermission(permissions.BasePermission):
                 id=request.user.id).exists():
             return True
 
+        if obj.project and obj.project.visibility == 'all' and getattr(request.user, 'role', '') == 'manager':
+            return True
+
         # 5. ИСПОЛНИТЕЛЬ задачи может её редактировать (например, менять статус)
         if obj.assignee == request.user:
             return True
@@ -578,6 +581,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 user == project.owner or
                 user == project.manager or
                 (project.visibility == 'selected' and project.allowed_users.filter(id=user.id).exists())
+                (project.visibility == 'all' and getattr(user, 'role', '') == 'manager')
         )
 
         data_to_save = request.data.copy()

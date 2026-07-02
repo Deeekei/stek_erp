@@ -69,6 +69,7 @@ function ProjectDetail() {
 
   // Модалка просмотра и редактирования
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false); // <-- ДОБАВЛЕН СТЕЙТ РЕЖИМА
   const [editingTask, setEditingTask] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [newCommentText, setNewCommentText] = useState('');
@@ -500,7 +501,9 @@ function ProjectDetail() {
       linked_tasks: task.linked_tasks || task.dependencies || [],
       is_milestone: task.is_milestone || false
     });
-    setNewCommentText(''); setIsEditModalOpen(true);
+    setNewCommentText('');
+    setIsEditMode(false); // ВАЖНО: Всегда открываем в режиме просмотра
+    setIsEditModalOpen(true);
   };
 
   const handleUpdateTask = async (e) => {
@@ -626,7 +629,14 @@ function ProjectDetail() {
     }
   };
 
-  const isBossAll = isFullAccess || project?.owner === currentUser?.id || project?.manager === currentUser?.id || (project?.visibility === 'selected' && project?.allowed_users?.includes(currentUser?.id));
+  const isRoleManager = currentUser?.role === 'manager';
+
+  const isBossAll = isFullAccess ||
+    project?.owner === currentUser?.id ||
+    project?.manager === currentUser?.id ||
+    (project?.visibility === 'selected' && project?.allowed_users?.includes(currentUser?.id)) ||
+    (project?.visibility === 'all' && isRoleManager); // <-- ПРАВИЛО ДЛЯ РУКОВОДИТЕЛЕЙ
+
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
   const isParticipantTask = (editingTask?.participants || []).includes(currentUser?.id);
 
@@ -827,7 +837,7 @@ function ProjectDetail() {
         </div>
       )}
 
-      {/* 1. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
+      {/* Модалка изменения проекта */}
       {isProjectEditModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsProjectEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
@@ -841,12 +851,13 @@ function ProjectDetail() {
       )}
 
       {/* === МОДАЛКА ПРОСМОТРА И РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
-      {/* 2. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1200px] h-[90vh] flex flex-col overflow-hidden">
             <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-              {canEditAll ? (
+
+              {/* РЕЖИМ ПОЛНОГО РЕДАКТИРОВАНИЯ */}
+              {canEditAll && isEditMode ? (
                 <>
                   <div className="w-full md:w-2/3 p-6 md:p-8 overflow-y-auto border-r border-gray-200 bg-white">
                     <div className="flex justify-between items-start mb-4">
@@ -942,6 +953,8 @@ function ProjectDetail() {
                   </div>
                 </>
               ) : (
+
+                /* РЕЖИМ ПРОСМОТРА (ДЛЯ ВСЕХ) */
                 <>
                   <div className="w-full md:w-2/3 flex flex-col bg-slate-50 border-r border-gray-200 p-6 md:p-8 order-2 md:order-1">
                     <div className="flex justify-between items-start mb-4 flex-shrink-0">
@@ -952,7 +965,16 @@ function ProjectDetail() {
                         </span>
                       </div>
 
-                      <button onClick={handleOpenDuplicateModal} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1">📑 Дублировать</button>
+                      <div className="flex items-center gap-2 ml-auto">
+                        <button onClick={handleOpenDuplicateModal} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1">📑 Дублировать</button>
+
+                        {/* КНОПКА ПЕРЕКЛЮЧЕНИЯ В РЕЖИМ РЕДАКТИРОВАНИЯ */}
+                        {canEditAll && (
+                          <button onClick={() => setIsEditMode(true)} className="text-xs bg-white hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm flex items-center gap-1.5">
+                            <span>✏️</span> Редактировать
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <h2 className="text-2xl font-extrabold text-gray-900 mb-6 flex-shrink-0 leading-tight break-words">
@@ -1047,10 +1069,19 @@ function ProjectDetail() {
               )}
             </div>
 
+            {/* ПАНЕЛЬ КНОПОК ПОД МОДАЛКОЙ */}
             <div className="bg-gray-50 border-t border-gray-200 p-4 flex flex-col sm:flex-row justify-end gap-3 flex-shrink-0">
-             <button onClick={() => setIsEditModalOpen(false)} className="w-full sm:w-auto px-6 py-2 bg-white text-gray-700 rounded-lg font-bold hover:bg-gray-100 transition-colors border border-gray-300">Закрыть</button>
-             {canEditAll && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить изменения</button>}
-             {(!canEditAll && isWorkerTask) && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить статус</button>}
+              {canEditAll && isEditMode ? (
+                <>
+                  <button onClick={() => setIsEditMode(false)} className="w-full sm:w-auto px-6 py-2 bg-white text-gray-700 rounded-lg font-bold hover:bg-gray-100 transition-colors border border-gray-300">Отмена</button>
+                  <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить изменения</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => setIsEditModalOpen(false)} className="w-full sm:w-auto px-6 py-2 bg-white text-gray-700 rounded-lg font-bold hover:bg-gray-100 transition-colors border border-gray-300">Закрыть</button>
+                  {isWorkerTask && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить статус</button>}
+                </>
+              )}
             </div>
 
           </div>
@@ -1058,7 +1089,6 @@ function ProjectDetail() {
       )}
 
       {/* === МОДАЛКА СОЗДАНИЯ КОПИИ ЗАДАЧИ === */}
-      {/* 3. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
       {isDuplicateModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsDuplicateModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -1099,7 +1129,7 @@ function ProjectDetail() {
 
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == dupTaskAssignee) || null} onChange={(opt) => setDupTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                 <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => dupTaskParticipants.includes(o.value))} onChange={(selected) => setDupTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Criticality</label><select value={dupTaskPriority} onChange={(e) => setDupTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
+                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label><select value={dupTaskPriority} onChange={(e) => setDupTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-4 border border-gray-100">
                 <div><label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План)</label><input type="date" value={dupTaskPlanStart} onChange={(e) => setDupTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" /></div>
@@ -1116,7 +1146,7 @@ function ProjectDetail() {
         </div>
       )}
 
-      {/* 4. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
+      {/* === МОДАЛКА ПРОСРОЧКИ ЗАДАЧИ === */}
       {isCompletionModalOpen && taskToComplete && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
@@ -1130,7 +1160,6 @@ function ProjectDetail() {
       )}
 
       {/* --- МОДАЛКА СОЗДАНИЯ ЗАДАЧИ --- */}
-      {/* 5. ИСПРАВЛЕНО: Заменен onClick на onMouseDown */}
       {isTaskModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskParent(''); setNewTaskFiles([]); setNewTaskParticipants([]); setNewTaskIsMilestone(false); } }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
