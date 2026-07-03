@@ -199,3 +199,13 @@ class Vacation(models.Model):
 
     def __str__(self):
         return f"{self.user} ({self.start_date} -> {self.end_date})"
+
+class TaskUserStatus(models.Model):
+    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='personal_task_statuses')
+    task = models.ForeignKey('Task', on_delete=models.CASCADE, related_name='user_statuses')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+
+    class Meta:
+        unique_together = ('user', 'task') # У одного юзера для одной задачи только один статус
+        verbose_name = "Персональный статус задачи"
+        verbose_name_plural = "Персональные статусы задач"

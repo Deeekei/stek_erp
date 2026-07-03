@@ -30,6 +30,18 @@ class TaskSerializer(serializers.ModelSerializer):
         model = Task
         fields = '__all__'
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+
+        # Если пользователь авторизован, проверяем его личный статус для этой задачи
+        if request and request.user:
+            personal = instance.user_statuses.filter(user=request.user).first()
+            if personal:
+                data['status'] = personal.status  # Подменяем глобальный статус на персональный
+
+        return data
+
     def validate(self, attrs):
         current_status = self.instance.status if self.instance else 'new'
         new_status = attrs.get('status', current_status)

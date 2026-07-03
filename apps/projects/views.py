@@ -138,6 +138,28 @@ class CanEditTaskPermission(permissions.BasePermission):
         is_assignee = (obj.assignee == request.user)
         is_participant = obj.participants.filter(id=request.user.id).exists()
 
+        # 3. Скрытие задачи доступно только причастным
+        if view.action == 'hide':
+            return is_boss or is_assignee or is_participant
+
+        # === НОВОЕ: Разрешаем Участникам отправлять PATCH/PUT (для смены личного статуса) ===
+        if request.method in ['PATCH', 'PUT'] and (is_boss or is_assignee or is_participant):
+            return True
+
+        # 4. Боссы и Исполнитель могут редактировать саму задачу полноценно
+        return is_boss or is_assignee
+
+        # === ПРОВЕРКА РОЛЕЙ ===
+        is_boss = (
+            getattr(request.user, 'role', '') in ['admin', 'director'] or
+            request.user.is_superuser or
+            (obj.project and obj.project.manager == request.user) or
+            (obj.project and obj.project.visibility == 'selected' and obj.project.allowed_users.filter(id=request.user.id).exists()) or
+            (obj.project and obj.project.visibility == 'all' and getattr(request.user, 'role', '') == 'manager')
+        )
+        is_assignee = (obj.assignee == request.user)
+        is_participant = obj.participants.filter(id=request.user.id).exists()
+
         # 3. Скрытие задачи доступно только причастным (чтобы левый юзер не скрыл чужую задачу)
         if view.action == 'hide':
             if is_boss or is_assignee or is_participant:
@@ -568,7 +590,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         """
-        Перехватываем сохранение задачи и жестко проверяем права на уровне полей.
+        Перехватываем сохранение задачи: проверяем права и разделяем глобальные/личные статусы.
         """
         partial = kwargs.pop('partial', False)
         task = self.get_object()
@@ -580,14 +602,62 @@ class TaskViewSet(viewsets.ModelViewSet):
                 user.is_superuser or
                 user == project.owner or
                 user == project.manager or
-                (project.visibility == 'selected' and project.allowed_users.filter(id=user.id).exists())
+                (project.visibility == 'selected' and project.allowed_users.filter(
+                    id=user.id).exists()) or  # <-- ИСПРАВЛЕН БАГ С ПРОПУЩЕННЫМ or
                 (project.visibility == 'all' and getattr(user, 'role', '') == 'manager')
         )
+        is_assignee = (user == task.assignee)
+        is_participant = task.participants.filter(id=user.id).exists()
 
         data_to_save = request.data.copy()
 
+        # === НОВОЕ: ПЕРЕХВАТЫВАЕМ ИЗМЕНЕНИЕ СТАТУСА УЧАСТНИКОМ ===
+        if is_participant and not is_assignee and not is_boss:
+            status_data = data_to_save.get('status')
+            if status_data:
+                from .models import TaskUserStatus, Notification  # Импортируем нашу новую модель
+
+                # 1. Сохраняем или обновляем персональный статус участника
+                TaskUserStatus.objects.update_or_create(
+                    user=user,
+                    task=task,
+                    defaults={'status': status_data}
+                )
+
+                # 2. Пишем авто-комментарий в чат задачи
+                full_name = user.get_full_name() or user.username
+                status_label = dict(Task.STATUS_CHOICES).get(status_data, status_data) if hasattr(Task,
+                                                                                                  'STATUS_CHOICES') else status_data
+                text = f"🏃‍♂️ {full_name} перевел(а) свою часть работы в статус '{status_label}'"
+
+                serializer_comment = CommentSerializer(data={'text': text})
+                if serializer_comment.is_valid():
+                    serializer_comment.save(task=task, author=user)
+
+                # 3. Отправляем пуш/email уведомление ответственному исполнителю
+                if task.assignee and task.assignee != user:
+                    task_link = f"/task/{task.id}"
+                    full_url = f"https://erp.stekufa.ru{task_link}"
+                    notify_user(
+                        user=task.assignee,
+                        title="Участник обновил статус",
+                        message=f"{text} в задаче '{task.title}'.\nПерейти к задаче: {full_url}",
+                        link=task_link
+                    )
+
+                # Возвращаем задачу (сериализатор сам подставит личный статус этого юзера)
+                serializer = self.get_serializer(task)
+                return Response(serializer.data)
+            else:
+                return Response(
+                    {'detail': 'Участники могут изменять только свой персональный статус задачи.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        # =========================================================
+
+        # Стандартная проверка для Исполнителя (не босса)
         if not is_boss:
-            if user == task.assignee:
+            if is_assignee:
                 allowed_keys = ['status', 'delay_reason', 'actual_end_date']
                 data_to_save = {k: v for k, v in data_to_save.items() if k in allowed_keys}
             else:

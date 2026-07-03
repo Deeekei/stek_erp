@@ -441,8 +441,17 @@ function ProjectDetail() {
 
     if (!isBoss && !isWorker && !isParticipant) return alert("Нет прав для действия.");
     if (isParticipant && !isWorker && !isBoss) {
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-      try { await api.post(`tasks/${taskId}/hide/`); } catch (error) { fetchTasks(); }
+      // 1. Визуально двигаем карточку на доске у участника
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+
+      try {
+        // 2. Шлем стандартный PATCH. Бэкенд сам поймет, что это участник,
+        // и сохранит статус в персональную таблицу, не ломая общую доску!
+        await api.patch(`tasks/${taskId}/`, { status: newStatus });
+      } catch (error) {
+        alert("Не удалось обновить статус");
+        fetchData(); // возвращаем как было при ошибке
+      }
       return;
     }
 

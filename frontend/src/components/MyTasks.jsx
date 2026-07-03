@@ -185,32 +185,18 @@ function MyTasks() {
     const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
 
     if (isParticipant && !isWorker && !isBoss) {
-      if (newStatus === 'completed') {
-        setTasks(prev => prev.filter(t => t.id !== taskId));
-        try {
-          await api.post(`tasks/${taskId}/hide/`, { status: newStatus });
-          await api.post(`tasks/${taskId}/add_comment/`, { text: `✅ Участник ${fullName} выполнил свою часть работы.` });
-        } catch (error) {
-          alert("Ошибка сети. Не удалось скрыть задачу.");
-          fetchData();
-        }
-        return;
-      } else if (newStatus === 'in_progress') {
-        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-        try {
-          await api.patch(`tasks/${taskId}/`, { status: newStatus });
-          const commentRes = await api.post(`tasks/${taskId}/add_comment/`, { text: `⚙️ Участник ${fullName} принял свою часть работы.` });
-          setTasks(prev => prev.map(t => t.id === taskId ? { ...t, comments: [...(t.comments || []), commentRes.data] } : t));
-        } catch (error) {
-          alert("Ошибка смены статуса.");
-          fetchData();
-        }
-        return;
-      } else {
-        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-        try { await api.patch(`tasks/${taskId}/`, { status: newStatus }); } catch (error) { fetchData(); }
-        return;
+      // 1. Визуально двигаем карточку на доске у участника
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+
+      try {
+        // 2. Шлем стандартный PATCH. Бэкенд сам поймет, что это участник,
+        // и сохранит статус в персональную таблицу, не ломая общую доску!
+        await api.patch(`tasks/${taskId}/`, { status: newStatus });
+      } catch (error) {
+        alert("Не удалось обновить статус");
+        fetchData(); // возвращаем как было при ошибке
       }
+      return;
     }
 
     const isOverdue = task.plan_end_date && task.plan_end_date < today;
