@@ -923,10 +923,33 @@ function ProjectDetail() {
                       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📎 Прикрепленные файлы</h4>
                       <div className="flex flex-wrap gap-2 mb-3">
                         {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
-                          <div key={att.id} className="relative text-xs bg-white border border-gray-200 px-3 py-2 rounded-lg flex flex-col shadow-sm min-w-[120px] max-w-xs group hover:border-blue-300 transition-colors">
-                            {canInteract && <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10" title="Удалить">✕</button>}
-                            <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 mb-1 hover:text-blue-600 truncate break-words"><span className="mr-2 text-base">📄</span> <span className="truncate">{att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл ${att.id}`}</span></a>
-                          </div>
+                          <div key={att.id} className="relative text-xs bg-white border border-gray-200 p-2.5 rounded-xl flex flex-col shadow-sm min-w-[150px] max-w-xs group hover:border-blue-300 transition-all">
+                              {canInteract && (
+                                <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>
+                              )}
+                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
+                                <span className="mr-2 text-base shrink-0">📄</span>
+                                <span className="truncate" title={att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}>
+                                  {att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}
+                                </span>
+                              </a>
+
+                              {/* === ИНФОРМАЦИЯ ОБ АВТОРЕ И ДАТЕ ЗАГРУЗКИ === */}
+                              <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
+                                <span className="truncate text-gray-500 flex items-center gap-1">
+                                  <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
+                                </span>
+                                {att.upload_at && (
+                                  <span className="flex items-center gap-1">
+                                    <span>🕒</span>
+                                    {new Date(att.upload_at).toLocaleDateString('ru-RU', {
+                                      day: '2-digit', month: '2-digit', year: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                         )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
                       </div>
                       {canInteract && <input type="file" onChange={handleFileUpload} className="text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer w-full" />}
