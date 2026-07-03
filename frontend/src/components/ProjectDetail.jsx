@@ -276,7 +276,7 @@ function ProjectDetail() {
       return matchName && matchAssignee && matchCompleted;
     });
   }, [tasks, filterTaskName, filterAssignee, hideCompleted]);
-  if (filterTaskName || filterAssignee || hideCompleted) {
+
 
   let finalOrderedTasks = orderedTasks;
   if (filterTaskName || filterAssignee || hideCompleted) {
