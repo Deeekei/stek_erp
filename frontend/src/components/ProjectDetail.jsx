@@ -265,19 +265,29 @@ function ProjectDetail() {
 
   const filteredTasksForBoard = useMemo(() => {
     return tasks.filter(t => {
-      const matchName = t.title.toLowerCase().includes(filterTaskName.toLowerCase());
+      const query = filterTaskName.toLowerCase().trim();
+      const matchName =
+        t.title.toLowerCase().includes(query) ||
+        t.id.toString().includes(query.replace('#', '')); // Поиск по ID
+
       const tAssigneeId = t.assignee && typeof t.assignee === 'object' ? t.assignee.id : t.assignee;
       const matchAssignee = filterAssignee ? tAssigneeId === filterAssignee : true;
       const matchCompleted = hideCompleted ? t.status !== 'completed' : true;
       return matchName && matchAssignee && matchCompleted;
     });
   }, [tasks, filterTaskName, filterAssignee, hideCompleted]);
+  if (filterTaskName || filterAssignee || hideCompleted) {
 
   let finalOrderedTasks = orderedTasks;
   if (filterTaskName || filterAssignee || hideCompleted) {
     const matchedIds = new Set();
     tasks.forEach(t => {
-      const matchName = t.title.toLowerCase().includes(filterTaskName.toLowerCase());
+      // ОБНОВЛЕННАЯ ЛОГИКА ПОИСКА:
+      const query = filterTaskName.toLowerCase().trim();
+      const matchName =
+        t.title.toLowerCase().includes(query) ||
+        t.id.toString().includes(query.replace('#', '')); // Поиск по ID
+
       const tAssigneeId = t.assignee && typeof t.assignee === 'object' ? t.assignee.id : t.assignee;
       const matchAssignee = filterAssignee ? tAssigneeId === filterAssignee : true;
       const matchCompleted = hideCompleted ? t.status !== 'completed' : true;

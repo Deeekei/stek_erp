@@ -122,12 +122,17 @@ function MyTasks() {
       const matchAssignee = taskAssigneeId == currentUser?.id || isParticipant;
 
       const matchCompleted = hideCompleted ? task.status !== 'completed' : true;
-      const matchSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase());
+
+      // ОБНОВЛЕННАЯ ЛОГИКА ПОИСКА:
+      const query = searchQuery.toLowerCase().trim();
+      const matchSearch =
+        task.title.toLowerCase().includes(query) ||
+        task.id.toString().includes(query.replace('#', '')); // Поиск по ID
 
       let matchActual = true;
       if (showOnlyActual) {
         const hasStarted = !task.plan_start_date || task.plan_start_date <= today;
-        const isNotFinished = task.status !== 'completed';
+        const isNotFinished = task.status !== 'completed' && task.status !== 'delayed';
         matchActual = hasStarted && isNotFinished;
       }
 
