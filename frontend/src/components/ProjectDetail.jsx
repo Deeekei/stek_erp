@@ -717,7 +717,7 @@ function ProjectDetail() {
         <div className="flex flex-col sm:flex-row items-center gap-2 w-full md:w-auto flex-1">
           <input
             type="text"
-            placeholder="🔍 Поиск по названию..."
+            placeholder="🔍 Поиск по названию или номеру..."
             className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-full sm:w-64 outline-none focus:ring-2 focus:ring-blue-500"
             value={filterTaskName}
             onChange={(e) => setFilterTaskName(e.target.value)}

@@ -413,7 +413,7 @@ function MyTasks() {
 
           <div className="w-full sm:w-64 relative flex-1 sm:flex-none">
             <span className="absolute left-3 top-2.5 text-gray-400">🔍</span>
-            <input type="text" placeholder="Поиск по названию..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-all" />
+            <input type="text" placeholder="Поиск по названию или номеру..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-all" />
           </div>
           <button onClick={() => setShowOnlyActual(!showOnlyActual)} className={`flex-1 sm:flex-none px-4 py-2 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-1.5 border ${showOnlyActual ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}><span>⚡</span> {showOnlyActual ? 'Актуальные задачи' : 'Только актуальные'}</button>
           <label className="flex items-center text-sm font-bold text-gray-600 cursor-pointer select-none bg-white hover:bg-gray-50 border border-gray-200 px-4 py-2 rounded-xl shadow-sm transition-colors flex-1 sm:flex-none justify-center sm:justify-start">
