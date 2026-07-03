@@ -76,7 +76,7 @@ class Task(models.Model):
     description = models.TextField(blank=True, verbose_name="Описание")
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tasks', verbose_name="Ответсвенный")
     participants = models.ManyToManyField(User, related_name='involved_tasks', blank=True, verbose_name='Участники')
-    status = models.CharFёield(max_length=20, choices=STATUS_CHOICES, default='new', verbose_name="Статус")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', verbose_name="Статус")
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium', verbose_name="Приоритет")
     plan_start_date = models.DateField(null=True, blank=True, verbose_name="Плановая дата начала")
     plan_end_date = models.DateField(verbose_name="Планируемая дата окончания")
