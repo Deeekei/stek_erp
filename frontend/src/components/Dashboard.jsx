@@ -43,9 +43,11 @@ function Dashboard() {
   const [newTaskParticipants, setNewTaskParticipants] = useState([]);
   const [newTaskProject, setNewTaskProject] = useState(null);
   const [newTaskFiles, setNewTaskFiles] = useState([]);
-  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false); // Стейт для вехи
+  const [newTaskIsMilestone, setNewTaskIsMilestone] = useState(false);
 
+  // Модалка просмотра и редактирования
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false); // Режим редактирования
   const [editingTask, setEditingTask] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [newCommentText, setNewCommentText] = useState('');
@@ -55,14 +57,6 @@ function Dashboard() {
   const [completionDelayReason, setCompletionDelayReason] = useState('');
 
   const today = new Date().toISOString().split('T')[0];
-
-  const checkIsParticipant = (participantsArray, userId) => {
-    if (!participantsArray || !Array.isArray(participantsArray)) return false;
-    return participantsArray.some(p => {
-      const pId = typeof p === 'object' ? p.id : p;
-      return pId == userId;
-    });
-  };
 
   useEffect(() => {
     const initFast = async () => {
@@ -117,7 +111,9 @@ function Dashboard() {
         api.get(`tasks/overdue/?page=${page}`)
       ]);
       setMetrics(metricsRes.data);
-      setOverdueTasks(overdueRes.data.results || overdueRes.data);
+      // ВАЖНО: Если бэкенд отдает задачи 'delayed' как overdue, фильтруем их тут, пока бэкенд не поправлен
+      const filteredOverdue = (overdueRes.data.results || overdueRes.data).filter(t => t.status !== 'delayed');
+      setOverdueTasks(filteredOverdue);
       setTotalOverduePages(Math.ceil((overdueRes.data.count || 0) / 10) || 1);
       setCurrentOverduePage(page);
     } catch (error) {
@@ -202,7 +198,7 @@ function Dashboard() {
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
       project: parseInt(newTaskProject), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee, participants: newTaskParticipants,
-      is_milestone: newTaskIsMilestone // Добавляем флаг вехи
+      is_milestone: newTaskIsMilestone
     };
     if (newTaskPlanStart) payload.plan_start_date = newTaskPlanStart;
 
@@ -228,15 +224,16 @@ function Dashboard() {
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
       plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium', participants: task.participants || [],
       project: task.project || null,
-      is_milestone: task.is_milestone || false // Подгружаем флаг вехи
+      is_milestone: task.is_milestone || false
     });
     setNewCommentText('');
+    setIsEditMode(false); // Сброс в режим просмотра
     setIsEditModalOpen(true);
   };
 
   const handleUpdateTask = async (e) => {
     e.preventDefault();
-    const isOverdue = editingTask.plan_end_date && editingTask.plan_end_date < today;
+    const isOverdue = editingTask.plan_end_date && editingTask.plan_end_date < today && editingTask.status !== 'delayed';
     if (editFormData.status === 'completed' && isOverdue && editingTask.status !== 'completed') {
       setTaskToComplete(editingTask); setCompletionDelayReason(editingTask.delay_reason || ''); setIsCompletionModalOpen(true); setIsEditModalOpen(false); return;
     }
@@ -319,12 +316,17 @@ function Dashboard() {
   };
 
   const taskProject = editingTask ? projects.find(p => p.id === editingTask.project) : null;
-  const isBossAll = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id));
+  const isRoleManager = currentUser?.role === 'manager';
+  const isBossAll = isFullAccess ||
+    taskProject?.owner === currentUser?.id ||
+    taskProject?.manager === currentUser?.id ||
+    (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) ||
+    (taskProject?.visibility === 'all' && isRoleManager);
+
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
-  const isParticipantTask = checkIsParticipant(editingTask?.participants, currentUser?.id);
 
   const canEditAll = isBossAll;
-  const canInteract = isBossAll || isWorkerTask || isParticipantTask;
+  const canInteract = true; // Разрешено всем (комменты и файлы)
 
   const getPriorityInfo = (priority) => {
     switch(priority) {
@@ -481,7 +483,7 @@ function Dashboard() {
           </ul>
 
           <div className="flex-1 flex flex-col overflow-hidden">
-            <h4 className="text-sm font-bold text-red-500 uppercase tracking-wider mb-3 flex-shrink-0 flex items-center">🚨 Просроченные ({metrics.overdue_count}):</h4>
+            <h4 className="text-sm font-bold text-red-500 uppercase tracking-wider mb-3 flex-shrink-0 flex items-center">🚨 Просроченные ({overdueTasks.length}):</h4>
             <div className="flex-1 overflow-y-auto space-y-2 pr-1 overflow-x-hidden">
               {overdueTasks.length > 0 ? (
                 overdueTasks.map(task => (
@@ -511,7 +513,7 @@ function Dashboard() {
 
       {/* --- МОДАЛКА НОВОСТИ --- */}
       {selectedNews && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-4" onClick={(e) => { if (e.target === e.currentTarget) setSelectedNews(null); }}>
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setSelectedNews(null); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden relative">
             <button onClick={() => setSelectedNews(null)} className="absolute top-4 right-4 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full w-8 h-8 flex items-center justify-center font-bold transition-colors z-10">✕</button>
             <div className="overflow-y-auto overflow-x-hidden p-5 sm:p-8 flex-1">
@@ -531,7 +533,7 @@ function Dashboard() {
 
       {/* --- МОДАЛКА ПУБЛИКАЦИИ НОВОСТИ --- */}
       {isNewsModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsNewsModalOpen(false); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsNewsModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">Опубликовать новость</h3>
             <form onSubmit={handleCreateNews} className="space-y-4 sm:space-y-5">
@@ -547,10 +549,10 @@ function Dashboard() {
 
       {/* === ЕДИНАЯ МОДАЛКА РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onClick={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] h-[90vh] flex flex-col overflow-hidden">
             <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
-              {canEditAll ? (
+              {canEditAll && isEditMode ? (
                 <>
                   <div className="w-full md:w-2/3 flex flex-col bg-white border-r border-gray-200 min-h-0">
                     <div className="flex-1 overflow-y-auto p-6 md:p-8">
@@ -565,18 +567,9 @@ function Dashboard() {
                       <form id="editForm" onSubmit={handleUpdateTask} className="space-y-4">
                         <input type="text" value={editFormData.title} onChange={e => setEditFormData({...editFormData, title: e.target.value})} className="w-full text-xl sm:text-2xl font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pb-1 mb-2" placeholder="Название задачи" required />
 
-                        {/* ЧЕКБОКС ВЕХИ ПРИ РЕДАКТИРОВАНИИ */}
                         <div className="flex items-center mb-4">
-                          <input
-                            type="checkbox"
-                            id="dash_is_milestone_edit"
-                            checked={editFormData.is_milestone || false}
-                            onChange={(e) => setEditFormData({...editFormData, is_milestone: e.target.checked})}
-                            className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                          />
-                          <label htmlFor="dash_is_milestone_edit" className="text-sm font-bold text-gray-700 cursor-pointer select-none">
-                            🚩 Отметить как веху
-                          </label>
+                          <input type="checkbox" id="dash_is_milestone_edit" checked={editFormData.is_milestone || false} onChange={(e) => setEditFormData({...editFormData, is_milestone: e.target.checked})} className="mr-2 cursor-pointer w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                          <label htmlFor="dash_is_milestone_edit" className="text-sm font-bold text-gray-700 cursor-pointer select-none">🚩 Отметить как веху</label>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -588,7 +581,12 @@ function Dashboard() {
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                           <div>
                             <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label>
-                            <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
+                            <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
+                              <option value="new">Новая</option>
+                              <option value="in_progress">В работе</option>
+                              <option value="delayed">⏸️ В отсрочке</option>
+                              <option value="completed">Завершена</option>
+                            </select>
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label>
@@ -657,6 +655,11 @@ function Dashboard() {
                         <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wide ${isWorkerTask ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
                           {isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}
                         </span>
+                        {canEditAll && (
+                          <button onClick={() => setIsEditMode(true)} className="ml-auto text-xs bg-white hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm flex items-center gap-1.5">
+                            <span>✏️</span> Редактировать
+                          </button>
+                        )}
                       </div>
                       <h2 className="text-2xl font-extrabold text-gray-900 leading-tight break-words">
                         {editingTask.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
@@ -702,12 +705,15 @@ function Dashboard() {
                       {isWorkerTask ? (
                         <form id="editForm" onSubmit={handleUpdateTask}>
                           <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-4 py-2 border border-blue-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-blue-900 font-semibold cursor-pointer">
-                            <option value="new">🆕 Новая</option><option value="in_progress">⚙️ В работе</option><option value="completed">✅ Завершена</option>
+                            <option value="new">🆕 Новая</option>
+                            <option value="in_progress">⚙️ В работе</option>
+                            <option value="delayed">⏸️ В отсрочке</option>
+                            <option value="completed">✅ Завершена</option>
                           </select>
                         </form>
                       ) : (
                         <div className="text-sm font-semibold text-gray-800">
-                          {editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : '✅ Завершена'}
+                          {editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}
                         </div>
                       )}
                     </div>
@@ -715,7 +721,7 @@ function Dashboard() {
                     <div className="space-y-4 mb-6">
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span>
-                        <span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span>
+                        <span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' && editingTask.status !== 'delayed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span>
                       </div>
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span>
@@ -763,8 +769,9 @@ function Dashboard() {
         </div>
       )}
 
+      {/* --- МОДАЛКА ПРОСРОЧКИ ЗАДАЧИ --- */}
       {isCompletionModalOpen && taskToComplete && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
             <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
             <form onSubmit={handleConfirmCompletion}>
@@ -777,7 +784,7 @@ function Dashboard() {
 
       {/* --- МОДАЛКА СОЗДАНИЯ ЗАДАЧИ --- */}
       {isTaskModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); setNewTaskIsMilestone(false); } }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) { setIsTaskModalOpen(false); setNewTaskProject(null); setNewTaskParticipants([]); setNewTaskFiles([]); setNewTaskIsMilestone(false); } }}>
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6 break-words">Новая задача</h3>
             <form onSubmit={handleCreateTask} className="space-y-4 sm:space-y-6">
@@ -787,7 +794,6 @@ function Dashboard() {
                   <input type="text" value={newTaskTitle} onChange={(e) => setNewTaskTitle(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 break-words" required />
                 </div>
 
-                {/* ЧЕКБОКС ВЕХИ ПРИ СОЗДАНИИ */}
                 <div className="sm:col-span-2 flex items-center mb-2">
                   <input
                     type="checkbox"
@@ -817,7 +823,19 @@ function Dashboard() {
 
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label><select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
+
+                {/* СЕЛЕКТ ПРИ СОЗДАНИИ ЗАДАЧИ */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Статус</label>
+                  <select value={newTaskStatus} onChange={(e) => setNewTaskStatus(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white">
+                    <option value="new">Новая</option>
+                    <option value="in_progress">В работе</option>
+                    <option value="delayed">⏸️ В отсрочке</option>
+                    <option value="completed">Завершена</option>
+                  </select>
+                </div>
+
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label><select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
               </div>
               <div className="bg-gray-50 p-4 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-4 border border-gray-100">
                 <div><label className="block text-xs font-bold text-gray-500 mb-1">Дата начала (План) *</label><input type="date" value={newTaskPlanStart} onChange={(e) => setNewTaskPlanStart(e.target.value)} className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm" /></div>

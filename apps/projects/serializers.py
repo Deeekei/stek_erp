@@ -35,13 +35,26 @@ class TaskSerializer(serializers.ModelSerializer):
         new_status = attrs.get('status', current_status)
         plan_end_date = attrs.get('plan_end_date', self.instance.plan_end_date if self.instance else None)
 
-        if new_status in ['completed', 'cancelled'] and plan_end_date:
+        # 1. Проверяем, что статус меняется именно сейчас
+        # (или задача сразу создается со статусом completed/cancelled)
+        is_closing_now = (
+                new_status in ['completed', 'cancelled'] and
+                current_status not in ['completed', 'cancelled']
+        )
+
+        # 2. Если мы прямо сейчас закрываем задачу, проверяем дедлайн
+        if is_closing_now and plan_end_date:
             today = timezone.now().date()
+
             if today > plan_end_date:
-                delay_reason = attrs.get('delay_reason', self.instance.delay_reason if self.instance else None)
+                # Берем причину из реквеста
+                delay_reason = attrs.get('delay_reason', '')
 
                 if not delay_reason or str(delay_reason).strip() == '':
-                    raise serializers.ValidationError({"delay_reason": "Задача просрочена. Пожалуйста, укажите причину просрочки"})
+                    raise serializers.ValidationError({
+                        "delay_reason": "Задача просрочена. Пожалуйста, укажите причину просрочки"
+                    })
+
         return attrs
 
     def update(self, instance, validated_data):
