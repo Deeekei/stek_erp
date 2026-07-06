@@ -75,11 +75,11 @@ function TaskStandalone() {
   const isAssignee = currentUser && task && currentUser.id === task.assignee;
   const isParticipant = currentUser && task && (task.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser.id);
 
-  const canEditAll = isBoss; // Только босс может менять название, сроки, проект
+  const canEditAll = isBoss;
   const canEditStatus = isBoss || isAssignee || isParticipant;
   const canInteract = true;
 
-  // Опции для селектов в режиме редактирования
+  // Опции для селектов и поиска имен
   const userOptions = useMemo(() => users.map(u => ({
     value: u.id,
     label: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || `Сотрудник №${u.id}`
@@ -116,7 +116,6 @@ function TaskStandalone() {
 
     const isOverdue = task.plan_end_date && new Date(task.plan_end_date) < new Date(today);
 
-    // Если меняют статус на Завершено в просроченной задаче
     if (editFormData.status === 'completed' && isOverdue && task.status !== 'completed') {
       setPendingStatus('completed_from_edit');
       setIsCompletionModalOpen(true);
@@ -137,7 +136,6 @@ function TaskStandalone() {
       const res = await api.patch(`tasks/${id}/`, payload);
       let updatedTask = res.data;
 
-      // Авто-комментарий при смене статуса
       if (task.status !== editFormData.status) {
         const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
         let autoText = '';
@@ -162,7 +160,6 @@ function TaskStandalone() {
     }
   };
 
-  // Быстрая смена статуса из режима просмотра
   const handleStatusSelect = (e) => {
     const newStatus = e.target.value;
     const isOverdue = task.plan_end_date && new Date(task.plan_end_date) < new Date(today);
@@ -252,7 +249,6 @@ function TaskStandalone() {
     } catch (error) { alert("Ошибка при удалении файла."); }
   };
 
-  // Экраны загрузки и ошибки
   if (loading) return <div className="p-10 flex justify-center items-center h-full text-gray-500 font-medium">Загрузка данных задачи...</div>;
   if (error) return (
     <div className="flex flex-col items-center justify-center mt-20 text-center p-4">
@@ -311,7 +307,6 @@ function TaskStandalone() {
                 </div>
               </div>
 
-              {/* КНОПКА РЕДАКТИРОВАНИЯ */}
               {canEditAll && (
                 <button onClick={handleOpenEdit} className="text-xs bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-xl font-bold transition-colors border border-gray-200 shadow-sm flex items-center gap-1.5 shrink-0 ml-4">
                   <span>✏️</span> Редактировать
@@ -410,25 +405,37 @@ function TaskStandalone() {
             </div>
 
             <div className="space-y-5 mb-8 bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
+
+              {/* Ответственный (Умный поиск из userOptions) */}
               <div>
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ответственный</p>
                 <div className="flex items-center mt-1.5">
-                  <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs mr-2">{task.assignee_details?.first_name?.[0] || 'U'}</div>
+                  <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs mr-2">
+                    {userOptions.find(o => o.value == (task.assignee?.id ?? task.assignee))?.label?.[0]?.toUpperCase() || 'U'}
+                  </div>
                   <span className="font-semibold text-gray-800 text-sm">
-                    {task.assignee_details?.first_name} {task.assignee_details?.last_name}
-                    {(!task.assignee_details?.first_name && task.assignee) ? `ID: ${task.assignee}` : ''}
-                    {!task.assignee && 'Не назначен'}
+                    {userOptions.find(o => o.value == (task.assignee?.id ?? task.assignee))?.label || 'Не назначен'}
                   </span>
                 </div>
               </div>
 
-              <div className="border-t border-gray-50 pt-4">
+              {/* Участники (Умный поиск из userOptions) */}
+              <div className="border-t border-gray-50 pt-4 mt-5">
                 <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2">Участники</span>
                 {task.participants && task.participants.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
                     {task.participants.map((p, idx) => {
-                      const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username) ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username : `Сотрудник №${typeof p === 'object' ? p.id : p}`;
-                      return <span key={idx} className="bg-gray-50 border border-gray-200 text-xs font-semibold text-gray-700 px-2 py-1 rounded-md shadow-sm flex items-center gap-1"><span className="text-gray-400">👤</span><span>{pName}</span></span>;
+                      const pId = typeof p === 'object' ? p.id : p;
+                      const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username)
+                        ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username
+                        : userOptions.find(o => o.value == pId)?.label || `Сотрудник №${pId}`;
+
+                      return (
+                        <span key={idx} className="bg-gray-50 border border-gray-200 text-xs font-semibold text-gray-700 px-2 py-1 rounded-md shadow-sm flex items-center gap-1">
+                          <span className="text-gray-400">👤</span>
+                          <span>{pName}</span>
+                        </span>
+                      );
                     })}
                   </div>
                 ) : <span className="text-xs font-semibold text-gray-400 italic">Нет участников</span>}
