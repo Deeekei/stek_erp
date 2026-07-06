@@ -69,7 +69,7 @@ function ProjectDetail() {
 
   // Модалка просмотра и редактирования
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false); // <-- ДОБАВЛЕН СТЕЙТ РЕЖИМА
+  const [isEditMode, setIsEditMode] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [newCommentText, setNewCommentText] = useState('');
@@ -277,12 +277,10 @@ function ProjectDetail() {
     });
   }, [tasks, filterTaskName, filterAssignee, hideCompleted]);
 
-
   let finalOrderedTasks = orderedTasks;
   if (filterTaskName || filterAssignee || hideCompleted) {
     const matchedIds = new Set();
     tasks.forEach(t => {
-      // ОБНОВЛЕННАЯ ЛОГИКА ПОИСКА:
       const query = filterTaskName.toLowerCase().trim();
       const matchName =
         t.title.toLowerCase().includes(query) ||
@@ -435,25 +433,33 @@ function ProjectDetail() {
     const newStatus = destination.droppableId;
     const task = tasks.find(t => t.id === taskId);
 
-    const isBoss = isFullAccess || project?.owner === currentUser?.id || project?.manager === currentUser?.id || (project?.visibility === 'selected' && project?.allowed_users?.includes(currentUser?.id));
-    const isWorker = task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id;
-    const isParticipant = (task.participants || []).includes(currentUser?.id);
+    // Универсальная проверка, является ли текущий юзер участником
+    const isParticipant = (task.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
-    if (!isBoss && !isWorker && !isParticipant) return alert("Нет прав для действия.");
-    if (isParticipant && !isWorker && !isBoss) {
-      // 1. Визуально двигаем карточку на доске у участника
+    // === 1. ЛОГИКА ДЛЯ УЧАСТНИКОВ (Приоритетная) ===
+    // Если ты участник, перетаскивание на Канбане меняет ТОЛЬКО личный статус, кем бы ты ни был.
+    if (isParticipant) {
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-
       try {
-        // 2. Шлем стандартный PATCH. Бэкенд сам поймет, что это участник,
-        // и сохранит статус в персональную таблицу, не ломая общую доску!
-        await api.patch(`tasks/${taskId}/`, { status: newStatus });
+        await api.patch(`tasks/${taskId}/`, { status: newStatus, personal_only: true });
       } catch (error) {
-        alert("Не удалось обновить статус");
-        fetchData(); // возвращаем как было при ошибке
+        alert("Не удалось обновить личный статус");
+        fetchTasks();
       }
       return;
     }
+
+    // === 2. ЛОГИКА ДЛЯ ОСТАЛЬНЫХ (Глобальный статус) ===
+    const isRoleManager = currentUser?.role === 'manager';
+    const isBoss = isFullAccess ||
+      project?.owner === currentUser?.id ||
+      project?.manager === currentUser?.id ||
+      (project?.visibility === 'selected' && project?.allowed_users?.includes(currentUser?.id)) ||
+      (project?.visibility === 'all' && isRoleManager);
+
+    const isWorker = task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id;
+
+    if (!isBoss && !isWorker) return alert("Нет прав для действия.");
 
     const isOverdue = task.plan_end_date && task.plan_end_date < today;
     if (newStatus === 'completed' && isOverdue) {
@@ -461,7 +467,20 @@ function ProjectDetail() {
     }
 
     setTasks(prevTasks => prevTasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-    try { await api.patch(`tasks/${taskId}/`, { status: newStatus }); } catch (error) { fetchTasks(); }
+    try {
+      await api.patch(`tasks/${taskId}/`, { status: newStatus });
+
+      // Авто-комментарий в чат
+      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
+      let autoText = '';
+      if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
+      if (newStatus === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
+
+      if (autoText) {
+        const commentRes = await api.post(`tasks/${taskId}/add_comment/`, { text: autoText });
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, comments: [...(t.comments || []), commentRes.data] } : t));
+      }
+    } catch (error) { alert("Ошибка при смене статуса"); fetchTasks(); }
   };
 
   const handleConfirmCompletion = async (e) => {
@@ -521,7 +540,7 @@ function ProjectDetail() {
       is_milestone: task.is_milestone || false
     });
     setNewCommentText('');
-    setIsEditMode(false); // ВАЖНО: Всегда открываем в режиме просмотра
+    setIsEditMode(false);
     setIsEditModalOpen(true);
   };
 
@@ -539,7 +558,24 @@ function ProjectDetail() {
     try {
       const payloadToUpdate = { ...editFormData, dependencies: editFormData.linked_tasks };
       const response = await api.patch(`tasks/${editingTask.id}/`, payloadToUpdate);
-      setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? response.data : t));
+      let updatedTask = response.data;
+
+      // Если статус поменялся через модалку — пишем авто-комментарий
+      if (editingTask.status !== editFormData.status) {
+        const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
+        let autoText = '';
+        if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
+        if (editFormData.status === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
+        if (editFormData.status === 'delayed') autoText = `⏸️ ${fullName} перевел(а) задачу в отсрочку`;
+        if (editFormData.status === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
+
+        if (autoText) {
+          const commentRes = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: autoText });
+          updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
+        }
+      }
+
+      setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? updatedTask : t));
       setIsEditModalOpen(false); setEditingTask(null);
     } catch (error) { alert("Ошибка сохранения"); }
   };
@@ -654,7 +690,7 @@ function ProjectDetail() {
     project?.owner === currentUser?.id ||
     project?.manager === currentUser?.id ||
     (project?.visibility === 'selected' && project?.allowed_users?.includes(currentUser?.id)) ||
-    (project?.visibility === 'all' && isRoleManager); // <-- ПРАВИЛО ДЛЯ РУКОВОДИТЕЛЕЙ
+    (project?.visibility === 'all' && isRoleManager);
 
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
   const isParticipantTask = (editingTask?.participants || []).includes(currentUser?.id);
@@ -914,7 +950,12 @@ function ProjectDetail() {
                         <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Связанные задачи</label><Select isMulti options={taskSelectOptions.filter(opt => opt.value !== editingTask.id)} value={taskSelectOptions.filter(opt => (editFormData.linked_tasks || []).includes(opt.value))} onChange={(selected) => setEditFormData({...editFormData, linked_tasks: selected ? selected.map(s => s.value) : []})} placeholder="Добавить связь..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                         <div>
                           <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label>
-                          <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select>
+                          <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
+                            <option value="new">Новая</option>
+                            <option value="in_progress">В работе</option>
+                            <option value="delayed">⏸️ В отсрочке</option>
+                            <option value="completed">Завершена</option>
+                          </select>
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label>
@@ -933,32 +974,31 @@ function ProjectDetail() {
                       <div className="flex flex-wrap gap-2 mb-3">
                         {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
                           <div key={att.id} className="relative text-xs bg-white border border-gray-200 p-2.5 rounded-xl flex flex-col shadow-sm min-w-[150px] max-w-xs group hover:border-blue-300 transition-all">
-                              {canInteract && (
-                                <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>
-                              )}
-                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
-                                <span className="mr-2 text-base shrink-0">📄</span>
-                                <span className="truncate" title={att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}>
-                                  {att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}
-                                </span>
-                              </a>
+                            {canInteract && (
+                              <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10" title="Удалить">✕</button>
+                            )}
+                            <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
+                              <span className="mr-2 text-base shrink-0">📄</span>
+                              <span className="truncate" title={att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}>
+                                {att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}
+                              </span>
+                            </a>
 
-                              {/* === ИНФОРМАЦИЯ ОБ АВТОРЕ И ДАТЕ ЗАГРУЗКИ === */}
-                              <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
-                                <span className="truncate text-gray-500 flex items-center gap-1">
-                                  <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
+                            <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
+                              <span className="truncate text-gray-500 flex items-center gap-1">
+                                <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
+                              </span>
+                              {att.upload_at && (
+                                <span className="flex items-center gap-1">
+                                  <span>🕒</span>
+                                  {new Date(att.upload_at).toLocaleDateString('ru-RU', {
+                                    day: '2-digit', month: '2-digit', year: '2-digit',
+                                    hour: '2-digit', minute: '2-digit'
+                                  })}
                                 </span>
-                                {att.upload_at && (
-                                  <span className="flex items-center gap-1">
-                                    <span>🕒</span>
-                                    {new Date(att.upload_at).toLocaleDateString('ru-RU', {
-                                      day: '2-digit', month: '2-digit', year: '2-digit',
-                                      hour: '2-digit', minute: '2-digit'
-                                    })}
-                                  </span>
-                                )}
-                              </div>
+                              )}
                             </div>
+                          </div>
                         )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
                       </div>
                       {canInteract && <input type="file" onChange={handleFileUpload} className="text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer w-full" />}
@@ -1061,12 +1101,15 @@ function ProjectDetail() {
                       {isWorkerTask ? (
                         <form id="editForm" onSubmit={handleUpdateTask}>
                           <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-4 py-2 border border-blue-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-blue-900 font-semibold cursor-pointer">
-                            <option value="new">🆕 Новая</option><option value="in_progress">⚙️ В работе</option><option value="delayed">⏸️ В отсрочке</option><option value="completed">✅ Завершена</option>
+                            <option value="new">🆕 Новая</option>
+                            <option value="in_progress">⚙️ В работе</option>
+                            <option value="delayed">⏸️ В отсрочке</option>
+                            <option value="completed">✅ Завершена</option>
                           </select>
                         </form>
                       ) : (
                         <div className="text-sm font-semibold text-gray-800">
-                          {editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : '✅ Завершена'}
+                          {editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}
                         </div>
                       )}
                     </div>
@@ -1097,11 +1140,33 @@ function ProjectDetail() {
 
                     <div className="pt-4 border-t border-gray-200 mt-auto">
                       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📎 Вложения</h4>
-                      <div className="flex flex-col gap-2 mb-3">
+                      <div className="flex flex-wrap gap-2 mb-3">
                         {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
-                          <div key={att.id} className="relative text-xs bg-white border border-gray-200 px-3 py-2 rounded-lg flex flex-col shadow-sm group hover:border-blue-300 transition-colors">
-                            {canInteract && <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>}
-                            <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words"><span className="mr-2 text-base">📄</span> <span className="truncate">{att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}</span></a>
+                          <div key={att.id} className="relative text-xs bg-white border border-gray-200 p-2.5 rounded-xl flex flex-col shadow-sm min-w-[150px] max-w-xs group hover:border-blue-300 transition-all">
+                            {canInteract && (
+                              <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>
+                            )}
+                            <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
+                              <span className="mr-2 text-base shrink-0">📄</span>
+                              <span className="truncate" title={att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}>
+                                {att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}
+                              </span>
+                            </a>
+
+                            <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
+                              <span className="truncate text-gray-500 flex items-center gap-1">
+                                <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
+                              </span>
+                              {att.upload_at && (
+                                <span className="flex items-center gap-1">
+                                  <span>🕒</span>
+                                  {new Date(att.upload_at).toLocaleDateString('ru-RU', {
+                                    day: '2-digit', month: '2-digit', year: '2-digit',
+                                    hour: '2-digit', minute: '2-digit'
+                                  })}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
                       </div>

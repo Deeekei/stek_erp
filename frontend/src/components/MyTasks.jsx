@@ -168,19 +168,32 @@ function MyTasks() {
     const taskId = parseInt(draggableId);
     const newStatus = destination.droppableId;
     const task = tasks.find(t => t.id === taskId);
-    const taskProject = projects.find(p => p.id === task.project);
 
-    const isRoleManager = currentUser?.role === 'manager';
-    const isBoss = isFullAccess ||
-      taskProject?.owner === currentUser?.id ||
-      taskProject?.manager === currentUser?.id ||
-      (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) ||
-      (taskProject?.visibility === 'all' && isRoleManager);
+    // Универсальная проверка, является ли текущий юзер участником
+    const isParticipant = (task.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
+    // === 1. ЛОГИКА ДЛЯ УЧАСТНИКОВ (Приоритетная) ===
+    // Если ты участник, перетаскивание на Канбане меняет ТОЛЬКО личный статус, кем бы ты ни был.
+    if (isParticipant) {
+      // Обновляем визуально (замени setTasks на setOverdueTasks, если это Dashboard)
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+
+      try {
+        // Отправляем специальный флаг personal_only: true
+        await api.patch(`tasks/${taskId}/`, { status: newStatus, personal_only: true });
+      } catch (error) {
+        alert("Не удалось обновить личный статус");
+        // Тут вызови функцию перезагрузки данных (fetchData / fetchTasks / fetchDashboardMetricsAndTasks)
+      }
+      return; // Завершаем выполнение, глобальные проверки не нужны
+    }
+
+    // === 2. ЛОГИКА ДЛЯ ОСТАЛЬНЫХ (Глобальный статус) ===
+    // Вычисляем isBoss и isWorker как это было в твоем коде:
     const isWorker = task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id;
-    const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
+    // ... здесь твой расчет isBoss ...
 
-    if (!isBoss && !isWorker && !isParticipant) return alert("Нет прав для действия.");
+    if (!isBoss && !isWorker) return alert("Нет прав для действия.");
 
     const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
 

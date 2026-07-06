@@ -589,9 +589,6 @@ class TaskViewSet(viewsets.ModelViewSet):
         return Response({'detail': 'Задача скрыта, лог сохранен'}, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
-        """
-        Перехватываем сохранение задачи: проверяем права и разделяем глобальные/личные статусы.
-        """
         partial = kwargs.pop('partial', False)
         task = self.get_object()
         user = request.user
@@ -602,8 +599,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 user.is_superuser or
                 user == project.owner or
                 user == project.manager or
-                (project.visibility == 'selected' and project.allowed_users.filter(
-                    id=user.id).exists()) or  # <-- ИСПРАВЛЕН БАГ С ПРОПУЩЕННЫМ or
+                (project.visibility == 'selected' and project.allowed_users.filter(id=user.id).exists()) or
                 (project.visibility == 'all' and getattr(user, 'role', '') == 'manager')
         )
         is_assignee = (user == task.assignee)
@@ -611,30 +607,32 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         data_to_save = request.data.copy()
 
-        # === НОВОЕ: ПЕРЕХВАТЫВАЕМ ИЗМЕНЕНИЕ СТАТУСА УЧАСТНИКОМ ===
-        if is_participant and not is_assignee and not is_boss:
+        # === ЧИТАЕМ ФЛАГ С ФРОНТЕНДА ===
+        is_personal_update = str(request.data.get('personal_only', '')).lower() == 'true'
+
+        # Если Участник перетащил карточку на Канбане (personal_only=True)
+        # ИЛИ это просто рядовой Участник (не босс/исполнитель) меняет статус через модалку
+        if is_participant and (is_personal_update or (not is_assignee and not is_boss)):
             status_data = data_to_save.get('status')
             if status_data:
-                from .models import TaskUserStatus, Notification  # Импортируем нашу новую модель
+                from .models import TaskUserStatus, Notification
 
-                # 1. Сохраняем или обновляем персональный статус участника
                 TaskUserStatus.objects.update_or_create(
                     user=user,
                     task=task,
                     defaults={'status': status_data}
                 )
 
-                # 2. Пишем авто-комментарий в чат задачи
                 full_name = user.get_full_name() or user.username
                 status_label = dict(Task.STATUS_CHOICES).get(status_data, status_data) if hasattr(Task,
                                                                                                   'STATUS_CHOICES') else status_data
                 text = f"🏃‍♂️ {full_name} перевел(а) свою часть работы в статус '{status_label}'"
 
+                from .serializers import CommentSerializer
                 serializer_comment = CommentSerializer(data={'text': text})
                 if serializer_comment.is_valid():
                     serializer_comment.save(task=task, author=user)
 
-                # 3. Отправляем пуш/email уведомление ответственному исполнителю
                 if task.assignee and task.assignee != user:
                     task_link = f"/task/{task.id}"
                     full_url = f"https://erp.stekufa.ru{task_link}"
@@ -645,17 +643,11 @@ class TaskViewSet(viewsets.ModelViewSet):
                         link=task_link
                     )
 
-                # Возвращаем задачу (сериализатор сам подставит личный статус этого юзера)
                 serializer = self.get_serializer(task)
                 return Response(serializer.data)
-            else:
-                return Response(
-                    {'detail': 'Участники могут изменять только свой персональный статус задачи.'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-        # =========================================================
 
-        # Стандартная проверка для Исполнителя (не босса)
+        # --- СТАНДАРТНОЕ ГЛОБАЛЬНОЕ ОБНОВЛЕНИЕ ---
+        # Сюда провалятся Боссы и Исполнители, если они не отправляли флаг personal_only
         if not is_boss:
             if is_assignee:
                 allowed_keys = ['status', 'delay_reason', 'actual_end_date']
