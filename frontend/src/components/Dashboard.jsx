@@ -754,6 +754,36 @@ function Dashboard() {
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
                       </div>
+                      {/* === НОВЫЙ БЛОК: СПИСОК УЧАСТНИКОВ === */}
+<div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Участники</span>
+  {editingTask.participants && editingTask.participants.length > 0 ? (
+    <div className="flex flex-wrap gap-1.5 mt-1.5">
+      {editingTask.participants.map((p, idx) => {
+        // Определяем ID: если пришел объект, берем .id, если число — берем как есть
+        const pId = typeof p === 'object' ? p.id : p;
+
+        // Ищем имя в списке всех пользователей или собираем из объекта
+        const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username)
+          ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username
+          : userOptions.find(o => o.value == pId)?.label || `Сотрудник №${pId}`;
+
+        return (
+          <span
+            key={idx}
+            className="bg-white border border-gray-200 text-xs font-semibold text-gray-700 px-2.5 py-1 rounded-md shadow-sm flex items-center gap-1 hover:border-blue-300 transition-colors"
+          >
+            <span className="text-gray-400">👤</span>
+            <span>{pName}</span>
+          </span>
+        );
+      })}
+    </div>
+  ) : (
+    <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
+  )}
+</div>
+{/* ======================================= */}
                       <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
                         <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span>
                         <span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {taskProject?.title || editingTask.project}</Link></span>
