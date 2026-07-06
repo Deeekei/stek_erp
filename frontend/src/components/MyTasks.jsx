@@ -13,7 +13,7 @@ import getDay from 'date-fns/getDay';
 import ru from 'date-fns/locale/ru';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
-// Настройка локализации календаря (неделя с понедельника, русский язык)
+// Настройка локализации календаря
 const locales = { 'ru': ru };
 const localizer = dateFnsLocalizer({
   format,
@@ -33,14 +33,17 @@ function MyTasks() {
   const [isFullAccess, setIsFullAccess] = useState(false);
 
   // === СТЕЙТЫ ОТОБРАЖЕНИЯ И ФИЛЬТРОВ ===
-  const [viewMode, setViewMode] = useState('kanban'); // 'kanban', 'list' или 'calendar'
+  const [viewMode, setViewMode] = useState('kanban');
   const [searchQuery, setSearchQuery] = useState('');
   const [hideCompleted, setHideCompleted] = useState(false);
   const [showOnlyActual, setShowOnlyActual] = useState(false);
 
+  // === СТЕЙТЫ ДЛЯ СОРТИРОВКИ ТАБЛИЦЫ ===
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+
   // === СТЕЙТЫ МОДАЛОК ===
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false); // Режим просмотра или редактирования
+  const [isEditMode, setIsEditMode] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [newCommentText, setNewCommentText] = useState('');
@@ -114,7 +117,7 @@ function MyTasks() {
 
   const projectOptions = useMemo(() => projects.map(p => ({ value: p.id, label: p.title })), [projects]);
 
-  // === ФИЛЬТРАЦИЯ ЗАДАЧ (ДЛЯ ВСЕХ ВИДОВ) ===
+  // === ФИЛЬТРАЦИЯ ЗАДАЧ ===
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
@@ -123,11 +126,10 @@ function MyTasks() {
 
       const matchCompleted = hideCompleted ? task.status !== 'completed' : true;
 
-      // ОБНОВЛЕННАЯ ЛОГИКА ПОИСКА:
       const query = searchQuery.toLowerCase().trim();
       const matchSearch =
         task.title.toLowerCase().includes(query) ||
-        task.id.toString().includes(query.replace('#', '')); // Поиск по ID
+        task.id.toString().includes(query.replace('#', ''));
 
       let matchActual = true;
       if (showOnlyActual) {
@@ -139,6 +141,64 @@ function MyTasks() {
       return matchAssignee && matchCompleted && matchActual && matchSearch;
     });
   }, [tasks, currentUser, hideCompleted, searchQuery, showOnlyActual, today]);
+
+
+  // === СОРТИРОВКА ДЛЯ ТАБЛИЦЫ ===
+  const sortedTasksForList = useMemo(() => {
+    let sortableTasks = [...filteredTasks];
+
+    if (sortConfig.key !== null) {
+      sortableTasks.sort((a, b) => {
+        let aValue = a[sortConfig.key];
+        let bValue = b[sortConfig.key];
+
+        // Умная сортировка для специфичных полей
+        if (sortConfig.key === 'priority') {
+          const weights = { low: 1, medium: 2, high: 3, critical: 4 };
+          aValue = weights[a.priority] || 0;
+          bValue = weights[b.priority] || 0;
+        } else if (sortConfig.key === 'project') {
+          aValue = (a.project_title || a.project || '').toString().toLowerCase();
+          bValue = (b.project_title || b.project || '').toString().toLowerCase();
+        } else if (sortConfig.key === 'status') {
+          const weights = { new: 1, in_progress: 2, delayed: 3, completed: 4 };
+          aValue = weights[a.status] || 0;
+          bValue = weights[b.status] || 0;
+        } else if (typeof aValue === 'string') {
+          aValue = aValue.toLowerCase();
+          bValue = (bValue || '').toLowerCase();
+        }
+
+        // Пустые значения (без дедлайна) всегда отправляем в конец списка
+        if (aValue === bValue) return 0;
+        if (!aValue) return 1;
+        if (!bValue) return -1;
+
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortableTasks;
+  }, [filteredTasks, sortConfig]);
+
+  // Обработчик клика по заголовку колонки
+  const requestSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  // Визуальная иконка сортировки
+  const getSortIcon = (columnName) => {
+    if (sortConfig.key === columnName) {
+      return sortConfig.direction === 'asc' ? '↑' : '↓';
+    }
+    return <span className="opacity-0 group-hover:opacity-40 transition-opacity">↕</span>;
+  };
+
 
   // === ФОРМАТИРОВАНИЕ ДЛЯ КАЛЕНДАРЯ ===
   const calendarEvents = useMemo(() => {
@@ -169,48 +229,32 @@ function MyTasks() {
     const newStatus = destination.droppableId;
     const task = tasks.find(t => t.id === taskId);
 
-    // Универсальная проверка, является ли текущий юзер участником
     const isParticipant = (task.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
-    // === 1. ЛОГИКА ДЛЯ УЧАСТНИКОВ (Приоритетная) ===
-    // Если ты участник, перетаскивание на Канбане меняет ТОЛЬКО личный статус, кем бы ты ни был.
     if (isParticipant) {
-      // Обновляем визуально (замени setTasks на setOverdueTasks, если это Dashboard)
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-
       try {
-        // Отправляем специальный флаг personal_only: true
         await api.patch(`tasks/${taskId}/`, { status: newStatus, personal_only: true });
       } catch (error) {
         alert("Не удалось обновить личный статус");
-        // Тут вызови функцию перезагрузки данных (fetchData / fetchTasks / fetchDashboardMetricsAndTasks)
+        fetchData();
       }
-      return; // Завершаем выполнение, глобальные проверки не нужны
+      return;
     }
 
-    // === 2. ЛОГИКА ДЛЯ ОСТАЛЬНЫХ (Глобальный статус) ===
-    // Вычисляем isBoss и isWorker как это было в твоем коде:
+    const taskProject = projects.find(p => p.id === task.project);
+    const isRoleManager = currentUser?.role === 'manager';
+    const isBoss = isFullAccess ||
+      taskProject?.owner === currentUser?.id ||
+      taskProject?.manager === currentUser?.id ||
+      (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) ||
+      (taskProject?.visibility === 'all' && isRoleManager);
+
     const isWorker = task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id;
-    // ... здесь твой расчет isBoss ...
 
     if (!isBoss && !isWorker) return alert("Нет прав для действия.");
 
     const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-
-    if (isParticipant && !isWorker && !isBoss) {
-      // 1. Визуально двигаем карточку на доске у участника
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-
-      try {
-        // 2. Шлем стандартный PATCH. Бэкенд сам поймет, что это участник,
-        // и сохранит статус в персональную таблицу, не ломая общую доску!
-        await api.patch(`tasks/${taskId}/`, { status: newStatus });
-      } catch (error) {
-        alert("Не удалось обновить статус");
-        fetchData(); // возвращаем как было при ошибке
-      }
-      return;
-    }
 
     const isOverdue = task.plan_end_date && task.plan_end_date < today;
     if (newStatus === 'completed' && isOverdue) {
@@ -266,7 +310,7 @@ function MyTasks() {
       is_milestone: task.is_milestone || false
     });
     setNewCommentText('');
-    setIsEditMode(false); // Всегда открываем в режиме просмотра
+    setIsEditMode(false);
     setIsEditModalOpen(true);
   };
 
@@ -307,6 +351,7 @@ function MyTasks() {
          let autoText = '';
          if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
          if (editFormData.status === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
+         if (editFormData.status === 'delayed') autoText = `⏸️ ${fullName} перевел(а) задачу в отсрочку`;
          if (editFormData.status === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
          if (autoText) {
              const commentRes = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: autoText });
@@ -370,7 +415,6 @@ function MyTasks() {
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
   const isParticipantTask = checkIsParticipant(editingTask?.participants, currentUser?.id);
 
-  // Обрати внимание: теперь canInteract разрешает всем писать комменты и грузить файлы
   const canEditAll = isBossAll;
   const canInteract = true;
 
@@ -402,8 +446,6 @@ function MyTasks() {
         </div>
 
         <div className="flex flex-col sm:flex-row flex-wrap items-center gap-3 w-full xl:w-auto shrink-0">
-
-          {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДОВ (Канбан / Список / Календарь) */}
           <div className="flex bg-gray-100 p-1 rounded-xl shadow-inner border border-gray-200 w-full sm:w-auto">
             <button onClick={() => setViewMode('kanban')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Канбан</button>
             <button onClick={() => setViewMode('list')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Список</button>
@@ -420,8 +462,6 @@ function MyTasks() {
           </label>
         </div>
       </div>
-
-      {/* === ОСНОВНАЯ ОБЛАСТЬ (РЕНДЕРИНГ В ЗАВИСИМОСТИ ОТ viewMode) === */}
 
       {/* 1. ВИД: КАНБАН ДОСКА */}
       {viewMode === 'kanban' && (
@@ -464,24 +504,36 @@ function MyTasks() {
         </DragDropContext>
       )}
 
-      {/* 2. ВИД: СПИСОК (ТАБЛИЦА) */}
+      {/* 2. ВИД: СПИСОК (ТАБЛИЦА С СОРТИРОВКОЙ) */}
       {viewMode === 'list' && (
         <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
           <div className="overflow-x-auto flex-1">
             <table className="w-full text-left border-collapse min-w-[800px]">
               <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 text-xs uppercase font-bold sticky top-0 z-10">
                 <tr>
-                  <th className="px-5 py-4 w-16">№</th>
-                  <th className="px-5 py-4 w-32">Приоритет</th>
-                  <th className="px-5 py-4 min-w-[250px]">Название</th>
-                  <th className="px-5 py-4 w-48">Проект</th>
-                  <th className="px-5 py-4 w-36">Статус</th>
-                  <th className="px-5 py-4 w-32">Дедлайн</th>
+                  <th className="px-5 py-4 w-16 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('id')}>
+                    <div className="flex items-center gap-1">№ <span className="text-blue-500 text-[11px]">{getSortIcon('id')}</span></div>
+                  </th>
+                  <th className="px-5 py-4 w-32 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('priority')}>
+                    <div className="flex items-center gap-1">Приоритет <span className="text-blue-500 text-[11px]">{getSortIcon('priority')}</span></div>
+                  </th>
+                  <th className="px-5 py-4 min-w-[250px] cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('title')}>
+                    <div className="flex items-center gap-1">Название <span className="text-blue-500 text-[11px]">{getSortIcon('title')}</span></div>
+                  </th>
+                  <th className="px-5 py-4 w-48 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('project')}>
+                    <div className="flex items-center gap-1">Проект <span className="text-blue-500 text-[11px]">{getSortIcon('project')}</span></div>
+                  </th>
+                  <th className="px-5 py-4 w-36 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('status')}>
+                    <div className="flex items-center gap-1">Статус <span className="text-blue-500 text-[11px]">{getSortIcon('status')}</span></div>
+                  </th>
+                  <th className="px-5 py-4 w-32 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('plan_end_date')}>
+                    <div className="flex items-center gap-1">Дедлайн <span className="text-blue-500 text-[11px]">{getSortIcon('plan_end_date')}</span></div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="text-sm">
-                {filteredTasks.length > 0 ? (
-                  filteredTasks.map(task => {
+                {sortedTasksForList.length > 0 ? (
+                  sortedTasksForList.map(task => {
                     const prioInfo = getPriorityInfo(task.priority);
                     const isOverdue = task.plan_end_date && task.plan_end_date < today && task.status !== 'completed';
                     const taskProjectTitle = task.project_title || projects.find(p => p.id === task.project)?.title || `Проект #${task.project}`;
@@ -597,7 +649,7 @@ function MyTasks() {
                           <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Проект</label><Select options={projectOptions} value={projectOptions.find(o => o.value == editFormData.project) || null} onChange={(opt) => setEditFormData({...editFormData, project: opt ? opt.value : null})} placeholder="Выбрать проект..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label><select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="completed">Завершена</option></select></div>
+                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label><select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="delayed">⏸️ В отсрочке</option><option value="completed">Завершена</option></select></div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label><select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -622,7 +674,6 @@ function MyTasks() {
                                 </span>
                               </a>
 
-                              {/* === ИНФОРМАЦИЯ ОБ АВТОРЕ И ДАТЕ ЗАГРУЗКИ === */}
                               <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
                                 <span className="truncate text-gray-500 flex items-center gap-1">
                                   <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
@@ -691,53 +742,55 @@ function MyTasks() {
                   </div>
 
                   <div className="w-full md:w-1/3 p-6 md:p-8 overflow-y-auto bg-white flex flex-col order-1 md:order-2 min-h-0">
-                    <div className={`mb-6 p-4 rounded-xl border ${isWorkerTask ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
-                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Статус задачи</label>
-                      {isWorkerTask ? (
+                    <div className={`mb-6 p-4 rounded-xl border ${isParticipantTask && !isWorkerTask && !isBossAll ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                        {isParticipantTask && !isWorkerTask && !isBossAll ? 'Ваш личный статус' : 'Глобальный статус'}
+                      </label>
+                      {isWorkerTask || isParticipantTask || isBossAll ? (
                         <form id="editForm" onSubmit={handleUpdateTask}>
-                          <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-4 py-2 border border-blue-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-blue-900 font-semibold cursor-pointer">
+                          <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className={`w-full px-4 py-2 border rounded-lg bg-white shadow-sm focus:ring-2 outline-none font-semibold cursor-pointer ${editFormData.status === 'completed' ? 'border-green-300 text-green-900 focus:ring-green-500' : editFormData.status === 'in_progress' ? 'border-blue-300 text-blue-900 focus:ring-blue-500' : editFormData.status === 'delayed' ? 'border-orange-300 text-orange-900 focus:ring-orange-500' : 'border-gray-300 text-gray-800 focus:ring-gray-400'}`}>
                             <option value="new">🆕 Новая</option><option value="in_progress">⚙️ В работе</option><option value="delayed">⏸️ В отсрочке</option><option value="completed">✅ Завершена</option>
                           </select>
                         </form>
                       ) : (
-                        <div className="text-sm font-semibold text-gray-800">{editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : '✅ Завершена'}</div>
+                        <div className="text-sm font-semibold text-gray-800">{editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}</div>
                       )}
                     </div>
 
                     <div className="space-y-4 mb-6">
+
+                      {/* === НОВЫЙ БЛОК ОТВЕТСТВЕННОГО И УЧАСТНИКОВ === */}
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
+                        <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
+                      </div>
+
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Участники</span>
+                        {editingTask.participants && editingTask.participants.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {editingTask.participants.map((p, idx) => {
+                              const pId = typeof p === 'object' ? p.id : p;
+                              const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username)
+                                ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username
+                                : userOptions.find(o => o.value == pId)?.label || `Сотрудник №${pId}`;
+
+                              return (
+                                <span key={idx} className="bg-white border border-gray-200 text-xs font-semibold text-gray-700 px-2.5 py-1 rounded-md shadow-sm flex items-center gap-1 hover:border-blue-300 transition-colors">
+                                  <span className="text-gray-400">👤</span>
+                                  <span>{pName}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
+                        )}
+                      </div>
+                      {/* ============================================= */}
+
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span><span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span></div>
-                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span><span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span></div>
-                      {/* === НОВЫЙ БЛОК: СПИСОК УЧАСТНИКОВ === */}
-<div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Участники</span>
-  {editingTask.participants && editingTask.participants.length > 0 ? (
-    <div className="flex flex-wrap gap-1.5 mt-1.5">
-      {editingTask.participants.map((p, idx) => {
-        // Определяем ID: если пришел объект, берем .id, если число — берем как есть
-        const pId = typeof p === 'object' ? p.id : p;
-
-        // Ищем имя в списке всех пользователей или собираем из объекта
-        const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username)
-          ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username
-          : userOptions.find(o => o.value == pId)?.label || `Сотрудник №${pId}`;
-
-        return (
-          <span
-            key={idx}
-            className="bg-white border border-gray-200 text-xs font-semibold text-gray-700 px-2.5 py-1 rounded-md shadow-sm flex items-center gap-1 hover:border-blue-300 transition-colors"
-          >
-            <span className="text-gray-400">👤</span>
-            <span>{pName}</span>
-          </span>
-        );
-      })}
-    </div>
-  ) : (
-    <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
-  )}
-</div>
-{/* ======================================= */}
                       <div className="bg-blue-50 p-3 rounded-lg border border-blue-100"><span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span><span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {taskProject?.title || editingTask.project}</Link></span></div>
                     </div>
 
@@ -758,7 +811,6 @@ function MyTasks() {
                                 </span>
                               </a>
 
-                              {/* === ИНФОРМАЦИЯ ОБ АВТОРЕ И ДАТЕ ЗАГРУЗКИ === */}
                               <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
                                 <span className="truncate text-gray-500 flex items-center gap-1">
                                   <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
@@ -792,7 +844,7 @@ function MyTasks() {
               ) : (
                 <>
                   <button onClick={() => setIsEditModalOpen(false)} className="w-full sm:w-auto px-6 py-2 bg-white text-gray-700 rounded-lg font-bold hover:bg-gray-100 transition-colors border border-gray-300">Закрыть</button>
-                  {isWorkerTask && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить статус</button>}
+                  {(isWorkerTask || isParticipantTask) && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить статус</button>}
                 </>
               )}
             </div>
