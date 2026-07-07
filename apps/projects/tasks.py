@@ -28,7 +28,8 @@ def send_notification_email(user_email, title, message):
 @shared_task
 def check_deadlines_and_notify():
     """
-    Ежедневная задача. Ищет задачи, до дедлайна которых осталось 10, 5 или 1 день.
+    Ежедневная задача. Ищет задачи, до дедлайна которых осталось 10, 5 или 1 день,
+    а также ежедневно напоминает о просроченных задачах (если они не в отсрочке).
     """
     from .views import notify_user
 
@@ -67,6 +68,16 @@ def check_deadlines_and_notify():
                 notify_user(task.assignee, title, message, link=task_link)
             except Exception as e:
                 print(f"Ошибка при отправке авто-уведомления для задачи ID {task.id}: {e}")
+
+        # === НОВАЯ ЛОГИКА: Ежедневное уведомление о просрочке ===
+        elif task_date < today and task.status != 'delayed':
+            title = "⚠️ Задача просрочена!"
+            message = f"Дедлайн по задаче «{task.title}» истек {task_date.strftime('%d.%m.%Y')}.\nПожалуйста, обновите статус, завершите её или переведите в отсрочку с указанием причины.\nПерейти к задаче: {task_url}"
+
+            try:
+                notify_user(task.assignee, title, message, link=task_link)
+            except Exception as e:
+                print(f"Ошибка при отправке уведомления о просрочке для задачи ID {task.id}: {e}")
 
 
 @shared_task

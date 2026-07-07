@@ -75,11 +75,22 @@ function MyTasks() {
       ]);
 
       const sortedTasks = [...(tasksRes.data.results || tasksRes.data)].sort((a, b) => {
+        // УМНАЯ СОРТИРОВКА: Просроченные задачи всегда идут первыми
+        const isAOverdue = a.plan_end_date && a.plan_end_date < today && a.status !== 'completed' && a.status !== 'delayed';
+        const isBOverdue = b.plan_end_date && b.plan_end_date < today && b.status !== 'completed' && b.status !== 'delayed';
+
+        // 1. ПРИОРИТЕТ: Просроченные выше
+        if (isAOverdue && !isBOverdue) return -1;
+        if (!isAOverdue && isBOverdue) return 1;
+
+        // 2. ВТОРОЙ УРОВЕНЬ: Если обе просрочены или обе нормальные, сортируем по дате
         const dateA = a.plan_start_date || a.plan_end_date;
         const dateB = b.plan_start_date || b.plan_end_date;
+
         if (!dateA && !dateB) return 0;
-        if (!dateA) return 1;
+        if (!dateA) return 1; // Задачи без дат уходят в самый конец
         if (!dateB) return -1;
+
         return new Date(dateA) - new Date(dateB);
       });
 

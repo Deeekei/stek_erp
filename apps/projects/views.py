@@ -714,12 +714,16 @@ class TaskViewSet(viewsets.ModelViewSet):
         user = request.user
         today = date.today()
 
-        metrics = Task.objects.filter(assignee=user).aggregate(
+        # Теперь мы ищем задачи, где пользователь - Исполнитель ИЛИ Участник
+        base_query = Q(assignee=user) | Q(participants=user)
+
+        metrics = Task.objects.filter(base_query).distinct().aggregate(
             total=Count('id'),
             new_tasks=Count('id', filter=Q(status='new')),
             in_progress=Count('id', filter=Q(status='in_progress')),
             completed=Count('id', filter=Q(status='completed')),
-            overdue_count=Count('id', filter=Q(plan_end_date__lt=today) & ~Q(status='completed'))
+            # Просроченные: дедлайн в прошлом, и статус не Завершен/Отсрочка
+            overdue_count=Count('id', filter=Q(plan_end_date__lt=today) & ~Q(status__in=['completed', 'delayed']))
         )
         return Response(metrics)
 
@@ -728,12 +732,17 @@ class TaskViewSet(viewsets.ModelViewSet):
         user = request.user
         today = date.today()
 
+        # Ищем просроченные задачи для Исполнителя и Участника
+        base_query = Q(assignee=user) | Q(participants=user)
+
         qs = Task.objects.filter(
-            assignee=user,
+            base_query,
             plan_end_date__lt=today
-        ).exclude(status='completed').select_related(
+        ).exclude(
+            status__in=['completed', 'delayed']
+        ).select_related(
             'project', 'assignee'
-        ).order_by('plan_end_date')
+        ).distinct().order_by('plan_end_date')
 
         paginator = DashboardOverduePagination()
         page = paginator.paginate_queryset(qs, request)

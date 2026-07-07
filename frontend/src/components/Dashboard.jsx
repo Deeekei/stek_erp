@@ -47,7 +47,7 @@ function Dashboard() {
 
   // Модалка просмотра и редактирования
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false); // Режим редактирования
+  const [isEditMode, setIsEditMode] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [newCommentText, setNewCommentText] = useState('');
@@ -111,7 +111,7 @@ function Dashboard() {
         api.get(`tasks/overdue/?page=${page}`)
       ]);
       setMetrics(metricsRes.data);
-      // ВАЖНО: Если бэкенд отдает задачи 'delayed' как overdue, фильтруем их тут, пока бэкенд не поправлен
+      // Если бэкенд отдает задачи 'delayed' как overdue, дополнительно страхуем тут
       const filteredOverdue = (overdueRes.data.results || overdueRes.data).filter(t => t.status !== 'delayed');
       setOverdueTasks(filteredOverdue);
       setTotalOverduePages(Math.ceil((overdueRes.data.count || 0) / 10) || 1);
@@ -144,9 +144,7 @@ function Dashboard() {
       link.click();
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
-    } catch (error) {
-      alert("Ошибка при выгрузке отчета по сотруднику.");
-    }
+    } catch (error) { alert("Ошибка при выгрузке отчета по сотруднику."); }
   };
 
   const handleDownloadProjectReport = async () => {
@@ -161,9 +159,7 @@ function Dashboard() {
       link.click();
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
-    } catch (error) {
-      alert("Ошибка при выгрузке отчета по проекту.");
-    }
+    } catch (error) { alert("Ошибка при выгрузке отчета по проекту."); }
   };
 
   const handleCreateNews = async (e) => {
@@ -227,18 +223,31 @@ function Dashboard() {
       is_milestone: task.is_milestone || false
     });
     setNewCommentText('');
-    setIsEditMode(false); // Сброс в режим просмотра
+    setIsEditMode(false);
     setIsEditModalOpen(true);
   };
 
   const handleUpdateTask = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     const isOverdue = editingTask.plan_end_date && editingTask.plan_end_date < today && editingTask.status !== 'delayed';
+
     if (editFormData.status === 'completed' && isOverdue && editingTask.status !== 'completed') {
       setTaskToComplete(editingTask); setCompletionDelayReason(editingTask.delay_reason || ''); setIsCompletionModalOpen(true); setIsEditModalOpen(false); return;
     }
+
+    // === ЛОГИКА ДЛЯ УЧАСТНИКОВ ===
+    const isParticipant = (editingTask.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
+    const isWorker = editingTask.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask.assignee == currentUser?.id;
+    const taskProject = projects.find(p => p.id === editingTask.project);
+    const isBoss = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) || (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
+
     const payload = { ...editFormData };
     if (!payload.plan_start_date) payload.plan_start_date = null;
+
+    // Отправляем флаг, если участник меняет статус
+    if (isParticipant && !isWorker && !isBoss) {
+      payload.personal_only = true;
+    }
 
     try {
       const response = await api.patch(`tasks/${editingTask.id}/`, payload);
@@ -249,6 +258,7 @@ function Dashboard() {
          let autoText = '';
          if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
          if (editFormData.status === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
+         if (editFormData.status === 'delayed') autoText = `⏸️ ${fullName} перевел(а) задачу в отсрочку`;
          if (editFormData.status === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
          if (autoText) {
              const commentRes = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: autoText });
@@ -264,7 +274,17 @@ function Dashboard() {
   const handleConfirmCompletion = async (e) => {
     e.preventDefault();
     if (!completionDelayReason.trim()) return alert("Необходимо указать причину просрочки!");
+
+    const isParticipant = (taskToComplete.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
+    const isWorker = taskToComplete.assignee && typeof taskToComplete.assignee === 'object' ? taskToComplete.assignee.id == currentUser?.id : taskToComplete.assignee == currentUser?.id;
+    const taskProject = projects.find(p => p.id === taskToComplete.project);
+    const isBoss = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) || (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
+
     const payload = { status: 'completed', delay_reason: completionDelayReason, actual_end_date: today };
+    if (isParticipant && !isWorker && !isBoss) {
+      payload.personal_only = true;
+    }
+
     setIsCompletionModalOpen(false);
 
     try {
@@ -324,9 +344,10 @@ function Dashboard() {
     (taskProject?.visibility === 'all' && isRoleManager);
 
   const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
+  const isParticipantTask = (editingTask?.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
   const canEditAll = isBossAll;
-  const canInteract = true; // Разрешено всем (комменты и файлы)
+  const canInteract = true;
 
   const getPriorityInfo = (priority) => {
     switch(priority) {
@@ -675,9 +696,7 @@ function Dashboard() {
                     <div className="p-6 md:px-8 pb-4 flex-shrink-0 border-b border-gray-200 bg-white">
                       <div className="flex items-center gap-2 mb-4">
                         <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
-                        <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wide ${isWorkerTask ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
-                          {isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}
-                        </span>
+                        <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wide ${isWorkerTask ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}</span>
                         {canEditAll && (
                           <button onClick={() => setIsEditMode(true)} className="ml-auto text-xs bg-white hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm flex items-center gap-1.5">
                             <span>✏️</span> Редактировать
@@ -723,77 +742,57 @@ function Dashboard() {
                   </div>
 
                   <div className="w-full md:w-1/3 p-6 md:p-8 overflow-y-auto bg-white flex flex-col order-1 md:order-2 min-h-0">
-                    <div className={`mb-6 p-4 rounded-xl border ${isWorkerTask ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
-                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Статус задачи</label>
-                      {isWorkerTask ? (
+                    <div className={`mb-6 p-4 rounded-xl border ${isParticipantTask && !isWorkerTask && !isBossAll ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                        {isParticipantTask && !isWorkerTask && !isBossAll ? 'Ваш личный статус' : 'Глобальный статус'}
+                      </label>
+                      {isWorkerTask || isParticipantTask || isBossAll ? (
                         <form id="editForm" onSubmit={handleUpdateTask}>
-                          <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-4 py-2 border border-blue-300 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-blue-500 outline-none text-blue-900 font-semibold cursor-pointer">
-                            <option value="new">🆕 Новая</option>
-                            <option value="in_progress">⚙️ В работе</option>
-                            <option value="delayed">⏸️ В отсрочке</option>
-                            <option value="completed">✅ Завершена</option>
+                          <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className={`w-full px-4 py-2 border rounded-lg bg-white shadow-sm focus:ring-2 outline-none font-semibold cursor-pointer ${editFormData.status === 'completed' ? 'border-green-300 text-green-900 focus:ring-green-500' : editFormData.status === 'in_progress' ? 'border-blue-300 text-blue-900 focus:ring-blue-500' : editFormData.status === 'delayed' ? 'border-orange-300 text-orange-900 focus:ring-orange-500' : 'border-gray-300 text-gray-800 focus:ring-gray-400'}`}>
+                            <option value="new">🆕 Новая</option><option value="in_progress">⚙️ В работе</option><option value="delayed">⏸️ В отсрочке</option><option value="completed">✅ Завершена</option>
                           </select>
                         </form>
                       ) : (
-                        <div className="text-sm font-semibold text-gray-800">
-                          {editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}
-                        </div>
+                        <div className="text-sm font-semibold text-gray-800">{editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}</div>
                       )}
                     </div>
 
                     <div className="space-y-4 mb-6">
-                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span>
-                        <span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' && editingTask.status !== 'delayed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span>
-                      </div>
-                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span>
-                        <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span>
-                      </div>
+                      {/* === БЛОК ОТВЕТСТВЕННОГО И УЧАСТНИКОВ === */}
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
                       </div>
-                      {/* === НОВЫЙ БЛОК: СПИСОК УЧАСТНИКОВ === */}
-<div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Участники</span>
-  {editingTask.participants && editingTask.participants.length > 0 ? (
-    <div className="flex flex-wrap gap-1.5 mt-1.5">
-      {editingTask.participants.map((p, idx) => {
-        // Определяем ID: если пришел объект, берем .id, если число — берем как есть
-        const pId = typeof p === 'object' ? p.id : p;
 
-        // Ищем имя в списке всех пользователей или собираем из объекта
-        const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username)
-          ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username
-          : userOptions.find(o => o.value == pId)?.label || `Сотрудник №${pId}`;
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Участники</span>
+                        {editingTask.participants && editingTask.participants.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {editingTask.participants.map((p, idx) => {
+                              const pId = typeof p === 'object' ? p.id : p;
+                              const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username)
+                                ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username
+                                : userOptions.find(o => o.value == pId)?.label || `Сотрудник №${pId}`;
 
-        return (
-          <span
-            key={idx}
-            className="bg-white border border-gray-200 text-xs font-semibold text-gray-700 px-2.5 py-1 rounded-md shadow-sm flex items-center gap-1 hover:border-blue-300 transition-colors"
-          >
-            <span className="text-gray-400">👤</span>
-            <span>{pName}</span>
-          </span>
-        );
-      })}
-    </div>
-  ) : (
-    <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
-  )}
-</div>
-{/* ======================================= */}
-                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                        <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span>
-                        <span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {taskProject?.title || editingTask.project}</Link></span>
+                              return (
+                                <span key={idx} className="bg-white border border-gray-200 text-xs font-semibold text-gray-700 px-2.5 py-1 rounded-md shadow-sm flex items-center gap-1 hover:border-blue-300 transition-colors">
+                                  <span className="text-gray-400">👤</span>
+                                  <span>{pName}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
+                        )}
                       </div>
+
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' && editingTask.status !== 'delayed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span><span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span></div>
+                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100"><span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span><span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {taskProject?.title || editingTask.project}</Link></span></div>
                     </div>
 
-                    <div className="mb-6 flex-1">
-                      <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2">Описание</span>
-                      <div className="text-gray-700 text-sm whitespace-pre-wrap leading-relaxed">{editingTask.description || <span className="italic text-gray-400">Описание отсутствует.</span>}</div>
-                    </div>
+                    <div className="mb-6 flex-1"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2">Описание</span><div className="text-gray-700 text-sm whitespace-pre-wrap leading-relaxed">{editingTask.description || <span className="italic text-gray-400">Описание отсутствует.</span>}</div></div>
 
                     <div className="pt-4 border-t border-gray-200 mt-auto">
                       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📎 Вложения</h4>
@@ -810,7 +809,6 @@ function Dashboard() {
                                 </span>
                               </a>
 
-                              {/* === ИНФОРМАЦИЯ ОБ АВТОРЕ И ДАТЕ ЗАГРУЗКИ === */}
                               <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
                                 <span className="truncate text-gray-500 flex items-center gap-1">
                                   <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
@@ -838,7 +836,7 @@ function Dashboard() {
             <div className="bg-gray-50 border-t border-gray-200 p-4 flex flex-col sm:flex-row justify-end gap-3 flex-shrink-0">
              <button onClick={() => setIsEditModalOpen(false)} className="w-full sm:w-auto px-6 py-2 bg-white text-gray-700 rounded-lg font-bold hover:bg-gray-100 transition-colors border border-gray-300">Закрыть</button>
              {canEditAll && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить изменения</button>}
-             {(!canEditAll && isWorkerTask) && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить статус</button>}
+             {(!canEditAll && (isWorkerTask || isParticipantTask)) && <button type="submit" form="editForm" className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-md">Сохранить статус</button>}
             </div>
 
           </div>
@@ -900,7 +898,6 @@ function Dashboard() {
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
 
-                {/* СЕЛЕКТ ПРИ СОЗДАНИИ ЗАДАЧИ */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Статус</label>
                   <select value={newTaskStatus} onChange={(e) => setNewTaskStatus(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white">
