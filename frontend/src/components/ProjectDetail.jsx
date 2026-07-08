@@ -268,7 +268,7 @@ function ProjectDetail() {
       const query = filterTaskName.toLowerCase().trim();
       const matchName =
         t.title.toLowerCase().includes(query) ||
-        t.id.toString().includes(query.replace('#', '')); // Поиск по ID
+        t.id.toString().includes(query.replace('#', ''));
 
       const tAssigneeId = t.assignee && typeof t.assignee === 'object' ? t.assignee.id : t.assignee;
       const matchAssignee = filterAssignee ? tAssigneeId === filterAssignee : true;
@@ -284,7 +284,7 @@ function ProjectDetail() {
       const query = filterTaskName.toLowerCase().trim();
       const matchName =
         t.title.toLowerCase().includes(query) ||
-        t.id.toString().includes(query.replace('#', '')); // Поиск по ID
+        t.id.toString().includes(query.replace('#', ''));
 
       const tAssigneeId = t.assignee && typeof t.assignee === 'object' ? t.assignee.id : t.assignee;
       const matchAssignee = filterAssignee ? tAssigneeId === filterAssignee : true;
@@ -433,11 +433,8 @@ function ProjectDetail() {
     const newStatus = destination.droppableId;
     const task = tasks.find(t => t.id === taskId);
 
-    // Универсальная проверка, является ли текущий юзер участником
     const isParticipant = (task.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
-    // === 1. ЛОГИКА ДЛЯ УЧАСТНИКОВ (Приоритетная) ===
-    // Если ты участник, перетаскивание на Канбане меняет ТОЛЬКО личный статус, кем бы ты ни был.
     if (isParticipant) {
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
       try {
@@ -449,7 +446,6 @@ function ProjectDetail() {
       return;
     }
 
-    // === 2. ЛОГИКА ДЛЯ ОСТАЛЬНЫХ (Глобальный статус) ===
     const isRoleManager = currentUser?.role === 'manager';
     const isBoss = isFullAccess ||
       project?.owner === currentUser?.id ||
@@ -470,7 +466,6 @@ function ProjectDetail() {
     try {
       await api.patch(`tasks/${taskId}/`, { status: newStatus });
 
-      // Авто-комментарий в чат
       const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
       let autoText = '';
       if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
@@ -491,7 +486,16 @@ function ProjectDetail() {
     setIsCompletionModalOpen(false);
     try {
       const response = await api.patch(`tasks/${taskToComplete.id}/`, payload);
-      setTasks(prevTasks => prevTasks.map(t => t.id === taskToComplete.id ? response.data : t));
+
+      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
+      const commentRes = await api.post(`tasks/${taskToComplete.id}/add_comment/`, {
+          text: `✅ ${fullName} завершил(а) задачу с просрочкой.\nПричина: ${completionDelayReason}`
+      });
+
+      let updatedTask = response.data;
+      updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
+
+      setTasks(prevTasks => prevTasks.map(t => t.id === taskToComplete.id ? updatedTask : t));
       setTaskToComplete(null); setCompletionDelayReason('');
     } catch (error) { fetchTasks(); }
   };
@@ -560,7 +564,6 @@ function ProjectDetail() {
       const response = await api.patch(`tasks/${editingTask.id}/`, payloadToUpdate);
       let updatedTask = response.data;
 
-      // Если статус поменялся через модалку — пишем авто-комментарий
       if (editingTask.status !== editFormData.status) {
         const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
         let autoText = '';
@@ -617,7 +620,6 @@ function ProjectDetail() {
     } catch (error) { alert("Ошибка удаления."); }
   };
 
-  // === ЛОГИКА ДУБЛИРОВАНИЯ ===
   const handleOpenDuplicateModal = async () => {
     if (!editingTask) return;
 
@@ -974,31 +976,31 @@ function ProjectDetail() {
                       <div className="flex flex-wrap gap-2 mb-3">
                         {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
                           <div key={att.id} className="relative text-xs bg-white border border-gray-200 p-2.5 rounded-xl flex flex-col shadow-sm min-w-[150px] max-w-xs group hover:border-blue-300 transition-all">
-                            {canInteract && (
-                              <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10" title="Удалить">✕</button>
-                            )}
-                            <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
-                              <span className="mr-2 text-base shrink-0">📄</span>
-                              <span className="truncate" title={att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}>
-                                {att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}
-                              </span>
-                            </a>
-
-                            <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
-                              <span className="truncate text-gray-500 flex items-center gap-1">
-                                <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
-                              </span>
-                              {att.upload_at && (
-                                <span className="flex items-center gap-1">
-                                  <span>🕒</span>
-                                  {new Date(att.upload_at).toLocaleDateString('ru-RU', {
-                                    day: '2-digit', month: '2-digit', year: '2-digit',
-                                    hour: '2-digit', minute: '2-digit'
-                                  })}
-                                </span>
+                              {canInteract && (
+                                <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>
                               )}
+                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
+                                <span className="mr-2 text-base shrink-0">📄</span>
+                                <span className="truncate" title={att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}>
+                                  {att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}
+                                </span>
+                              </a>
+
+                              <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
+                                <span className="truncate text-gray-500 flex items-center gap-1">
+                                  <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
+                                </span>
+                                {att.upload_at && (
+                                  <span className="flex items-center gap-1">
+                                    <span>🕒</span>
+                                    {new Date(att.upload_at).toLocaleDateString('ru-RU', {
+                                      day: '2-digit', month: '2-digit', year: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          </div>
                         )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
                       </div>
                       {canInteract && <input type="file" onChange={handleFileUpload} className="text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer w-full" />}
@@ -1008,22 +1010,33 @@ function ProjectDetail() {
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 p-6 md:p-8">
                     <h4 className="text-lg font-extrabold text-gray-800 mb-4 flex-shrink-0 flex items-center gap-2">💬 Чат</h4>
                     <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
-                      {editingTask.comments && editingTask.comments.length > 0 ? (
-                        editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name && (
-                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
-                            (currentUser.username && c.author_name.includes(currentUser.username))
-                          );
-                          return (
-                            <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                              <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                                {!isMe && <div className="font-bold text-xs text-blue-600 mb-1">{c.author_name}</div>}
-                                <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                      {editingTask.comments?.map(c => {
+                        const isMe = currentUser && c.author_name && (
+                          (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                          (currentUser.username && c.author_name.includes(currentUser.username))
+                        );
+                        return (
+                          <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                            <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
+                              {/* --- ШАПКА СООБЩЕНИЯ С ИМЕНЕМ И ДАТОЙ --- */}
+                              <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
+                                {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
+                                {c.created_at && (
+                                  <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
+                                    {new Date(c.created_at).toLocaleString('ru-RU', {
+                                      day: '2-digit', month: '2-digit', year: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                )}
                               </div>
+                              {/* -------------------------------------- */}
+                              <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                             </div>
-                          );
-                        })
-                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
+                          </div>
+                        );
+                      })}
+                      {(!editingTask.comments || editingTask.comments.length === 0) && <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
                     </div>
                     {canInteract && (
                       <div className="flex-shrink-0 bg-white p-2 rounded-xl border border-gray-200 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
@@ -1066,22 +1079,33 @@ function ProjectDetail() {
                     </h2>
 
                     <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
-                      {editingTask.comments && editingTask.comments.length > 0 ? (
-                        editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name && (
-                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
-                            (currentUser.username && c.author_name.includes(currentUser.username))
-                          );
-                          return (
-                            <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                              <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                                {!isMe && <div className="font-bold text-xs text-blue-600 mb-1">{c.author_name}</div>}
-                                <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                      {editingTask.comments?.map(c => {
+                        const isMe = currentUser && c.author_name && (
+                          (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                          (currentUser.username && c.author_name.includes(currentUser.username))
+                        );
+                        return (
+                          <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                            <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
+                              {/* --- ШАПКА СООБЩЕНИЯ С ИМЕНЕМ И ДАТОЙ --- */}
+                              <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
+                                {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
+                                {c.created_at && (
+                                  <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
+                                    {new Date(c.created_at).toLocaleString('ru-RU', {
+                                      day: '2-digit', month: '2-digit', year: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                )}
                               </div>
+                              {/* -------------------------------------- */}
+                              <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                             </div>
-                          );
-                        })
-                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium">Здесь пока тихо. Напишите первым!</p></div>}
+                          </div>
+                        );
+                      })}
+                      {(!editingTask.comments || editingTask.comments.length === 0) && <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium">Здесь пока тихо. Напишите первым!</p></div>}
                     </div>
 
                     {canInteract && (
@@ -1127,36 +1151,30 @@ function ProjectDetail() {
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
                       </div>
-                      {/* === НОВЫЙ БЛОК: СПИСОК УЧАСТНИКОВ === */}
-<div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Участники</span>
-  {editingTask.participants && editingTask.participants.length > 0 ? (
-    <div className="flex flex-wrap gap-1.5 mt-1.5">
-      {editingTask.participants.map((p, idx) => {
-        // Определяем ID: если пришел объект, берем .id, если число — берем как есть
-        const pId = typeof p === 'object' ? p.id : p;
+                      {/* === БЛОК УЧАСТНИКОВ === */}
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Участники</span>
+                        {editingTask.participants && editingTask.participants.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {editingTask.participants.map((p, idx) => {
+                              const pId = typeof p === 'object' ? p.id : p;
+                              const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username)
+                                ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username
+                                : userOptions.find(o => o.value == pId)?.label || `Сотрудник №${pId}`;
 
-        // Ищем имя в списке всех пользователей или собираем из объекта
-        const pName = typeof p === 'object' && (p.first_name || p.last_name || p.username)
-          ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.username
-          : userOptions.find(o => o.value == pId)?.label || `Сотрудник №${pId}`;
-
-        return (
-          <span
-            key={idx}
-            className="bg-white border border-gray-200 text-xs font-semibold text-gray-700 px-2.5 py-1 rounded-md shadow-sm flex items-center gap-1 hover:border-blue-300 transition-colors"
-          >
-            <span className="text-gray-400">👤</span>
-            <span>{pName}</span>
-          </span>
-        );
-      })}
-    </div>
-  ) : (
-    <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
-  )}
-</div>
-{/* ======================================= */}
+                              return (
+                                <span key={idx} className="bg-white border border-gray-200 text-xs font-semibold text-gray-700 px-2.5 py-1 rounded-md shadow-sm flex items-center gap-1 hover:border-blue-300 transition-colors">
+                                  <span className="text-gray-400">👤</span>
+                                  <span>{pName}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
+                        )}
+                      </div>
+                      {/* ======================= */}
                       <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
                         <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span>
                         <span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {project?.title || editingTask.project}</Link></span>
@@ -1170,7 +1188,7 @@ function ProjectDetail() {
 
                     <div className="pt-4 border-t border-gray-200 mt-auto">
                       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📎 Вложения</h4>
-                      <div className="flex flex-wrap gap-2 mb-3">
+                      <div className="flex flex-col gap-2 mb-3">
                         {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
                           <div key={att.id} className="relative text-xs bg-white border border-gray-200 p-2.5 rounded-xl flex flex-col shadow-sm min-w-[150px] max-w-xs group hover:border-blue-300 transition-all">
                             {canInteract && (
