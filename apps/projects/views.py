@@ -696,8 +696,22 @@ class TaskViewSet(viewsets.ModelViewSet):
                     link=task_link
                 )
 
-        if old_assignee != task.assignee and task.assignee:
-            if task.assignee != self.request.user:
+        # === ПРОВЕРКА СМЕНЫ ИСПОЛНИТЕЛЯ ===
+        if old_assignee != task.assignee:
+            # 1. Формируем имена для комментария
+            old_name = old_assignee.get_full_name() or old_assignee.username if old_assignee else "Не назначен"
+            new_name = task.assignee.get_full_name() or task.assignee.username if task.assignee else "Не назначен"
+
+            # 2. Создаем авто-комментарий
+            from .models import Comment
+            Comment.objects.create(
+                task=task,
+                author=self.request.user,
+                text=f"🔄 В задаче сменился ответственный. Был: {old_name} стал: {new_name}"
+            )
+
+            # 3. Отправляем уведомление новому исполнителю (если он есть и это не сам автор изменений)
+            if task.assignee and task.assignee != self.request.user:
                 notify_user(
                     user=task.assignee,
                     title="Новое назначение",

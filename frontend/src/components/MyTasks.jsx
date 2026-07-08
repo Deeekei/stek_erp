@@ -706,6 +706,49 @@ function MyTasks() {
                       </div>
                     </div>
                   </div>
+                  <div className="w-full md:w-1/3 flex flex-col bg-slate-50 min-h-0">
+                    <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200"><h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4></div>
+                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                      {editingTask.comments && editingTask.comments.length > 0 ? (
+                        editingTask.comments.map(c => {
+                          const isMe = currentUser && c.author_name && (
+                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                            (currentUser.username && c.author_name.includes(currentUser.username))
+                          );
+                          return (
+                            <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                              <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
+                                {/* --- ШАПКА СООБЩЕНИЯ С ИМЕНЕМ И ДАТОЙ --- */}
+                                <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
+                                  {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
+                                  {c.created_at && (
+                                    <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
+                                      {new Date(c.created_at).toLocaleString('ru-RU', {
+                                        day: '2-digit', month: '2-digit', year: '2-digit',
+                                        hour: '2-digit', minute: '2-digit'
+                                      })}
+                                    </span>
+                                  )}
+                                </div>
+                                {/* -------------------------------------- */}
+                                <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
+                    </div>
+                    {canInteract && (
+                      <div className="p-4 bg-white border-t border-gray-200 flex-shrink-0">
+                        <div className="bg-slate-50 p-2 rounded-xl border border-gray-200 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                          <textarea value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Написать..." className="w-full text-sm outline-none resize-none min-h-[60px] break-words bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddComment(e); }} />
+                          <div className="flex justify-between items-center mt-2 border-t border-gray-100 pt-2">
+                            <button onClick={handleAddComment} className="bg-blue-600 text-white px-5 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 w-full sm:w-auto">Отправить</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 <>
@@ -726,17 +769,32 @@ function MyTasks() {
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
                       {editingTask.comments && editingTask.comments.length > 0 ? (
                         editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name && ((currentUser.first_name && c.author_name.includes(currentUser.first_name)) || (currentUser.username && c.author_name.includes(currentUser.username)));
+                          const isMe = currentUser && c.author_name && (
+                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                            (currentUser.username && c.author_name.includes(currentUser.username))
+                          );
                           return (
                             <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                              <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                                {!isMe && <div className="font-bold text-xs text-blue-600 mb-1">{c.author_name}</div>}
+                              <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
+                                {/* --- ШАПКА СООБЩЕНИЯ С ИМЕНЕМ И ДАТОЙ --- */}
+                                <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
+                                  {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
+                                  {c.created_at && (
+                                    <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
+                                      {new Date(c.created_at).toLocaleString('ru-RU', {
+                                        day: '2-digit', month: '2-digit', year: '2-digit',
+                                        hour: '2-digit', minute: '2-digit'
+                                      })}
+                                    </span>
+                                  )}
+                                </div>
+                                {/* -------------------------------------- */}
                                 <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                               </div>
                             </div>
                           );
                         })
-                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium">Здесь пока тихо.</p></div>}
+                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
                     </div>
 
                     {canInteract && (
@@ -769,8 +827,6 @@ function MyTasks() {
                     </div>
 
                     <div className="space-y-4 mb-6">
-
-                      {/* === НОВЫЙ БЛОК ОТВЕТСТВЕННОГО И УЧАСТНИКОВ === */}
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
@@ -798,7 +854,6 @@ function MyTasks() {
                           <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
                         )}
                       </div>
-                      {/* ============================================= */}
 
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span><span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span></div>
