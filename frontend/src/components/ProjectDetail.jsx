@@ -12,13 +12,11 @@ function ProjectDetail() {
   const fileInputRef = useRef(null);
   const ganttContainerRef = useRef(null);
 
-  // Стейты для перемещения (скроллинга) по Ганту
   const isDragging = useRef(false);
   const lastX = useRef(0);
   const lastY = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // Стейты для изменения ширины
   const isResizingColumn = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
@@ -33,7 +31,6 @@ function ProjectDetail() {
   const [loadingProject, setLoadingProject] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(true);
 
-  // === СТЕЙТЫ ДЛЯ ФИЛЬТРОВ ===
   const [filterTaskName, setFilterTaskName] = useState('');
   const [filterAssignee, setFilterAssignee] = useState(null);
   const [hideCompleted, setHideCompleted] = useState(false);
@@ -61,6 +58,7 @@ function ProjectDetail() {
   const [newTaskPlanStart, setNewTaskPlanStart] = useState('');
   const [newTaskPlanEnd, setNewTaskPlanEnd] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
+  const [newTaskExecutor, setNewTaskExecutor] = useState(null); // <-- Исполнитель
   const [newTaskParticipants, setNewTaskParticipants] = useState([]);
   const [newTaskParent, setNewTaskParent] = useState('');
   const [newTaskLinkedTasks, setNewTaskLinkedTasks] = useState([]);
@@ -84,6 +82,7 @@ function ProjectDetail() {
   const [dupTaskPlanStart, setDupTaskPlanStart] = useState('');
   const [dupTaskPlanEnd, setDupTaskPlanEnd] = useState('');
   const [dupTaskAssignee, setDupTaskAssignee] = useState(null);
+  const [dupTaskExecutor, setDupTaskExecutor] = useState(null); // <-- Исполнитель для копии
   const [dupTaskParticipants, setDupTaskParticipants] = useState([]);
   const [dupTaskProject, setDupTaskProject] = useState(null);
   const [dupTaskFiles, setDupTaskFiles] = useState([]);
@@ -453,7 +452,10 @@ function ProjectDetail() {
       (project?.visibility === 'selected' && project?.allowed_users?.includes(currentUser?.id)) ||
       (project?.visibility === 'all' && isRoleManager);
 
-    const isWorker = task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id;
+    // Добавляем проверку прав для Исполнителя (executor) и Ответственного (assignee)
+    const isWorker =
+      (task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id) ||
+      (task.executor && typeof task.executor === 'object' ? task.executor.id == currentUser?.id : task.executor == currentUser?.id);
 
     if (!isBoss && !isWorker) return alert("Нет прав для действия.");
 
@@ -465,16 +467,7 @@ function ProjectDetail() {
     setTasks(prevTasks => prevTasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
     try {
       await api.patch(`tasks/${taskId}/`, { status: newStatus });
-
-      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-      let autoText = '';
-      if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
-      if (newStatus === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
-
-      if (autoText) {
-        const commentRes = await api.post(`tasks/${taskId}/add_comment/`, { text: autoText });
-        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, comments: [...(t.comments || []), commentRes.data] } : t));
-      }
+      // Примечание: Мы убрали генерацию комментария на фронтенде, так как теперь бэкенд это делает сам!
     } catch (error) { alert("Ошибка при смене статуса"); fetchTasks(); }
   };
 
@@ -486,16 +479,7 @@ function ProjectDetail() {
     setIsCompletionModalOpen(false);
     try {
       const response = await api.patch(`tasks/${taskToComplete.id}/`, payload);
-
-      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-      const commentRes = await api.post(`tasks/${taskToComplete.id}/add_comment/`, {
-          text: `✅ ${fullName} завершил(а) задачу с просрочкой.\nПричина: ${completionDelayReason}`
-      });
-
-      let updatedTask = response.data;
-      updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
-
-      setTasks(prevTasks => prevTasks.map(t => t.id === taskToComplete.id ? updatedTask : t));
+      setTasks(prevTasks => prevTasks.map(t => t.id === taskToComplete.id ? response.data : t));
       setTaskToComplete(null); setCompletionDelayReason('');
     } catch (error) { fetchTasks(); }
   };
@@ -508,7 +492,9 @@ function ProjectDetail() {
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
       project: parseInt(id), plan_start_date: newTaskPlanStart, plan_end_date: newTaskPlanEnd,
-      assignee: newTaskAssignee, participants: newTaskParticipants,
+      assignee: newTaskAssignee,
+      executor: newTaskExecutor, // <-- Добавлен Исполнитель
+      participants: newTaskParticipants,
       parent_task: newTaskParent ? parseInt(newTaskParent) : null,
       linked_tasks: newTaskLinkedTasks, dependencies: newTaskLinkedTasks,
       is_milestone: newTaskIsMilestone
@@ -529,17 +515,22 @@ function ProjectDetail() {
       setTasks(prevTasks => [...prevTasks, createdTask]);
       setIsTaskModalOpen(false);
       setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd('');
-      setNewTaskAssignee(null); setNewTaskParticipants([]); setNewTaskParent(''); setNewTaskLinkedTasks([]); setNewTaskFiles([]); setNewTaskIsMilestone(false);
+      setNewTaskAssignee(null); setNewTaskExecutor(null); setNewTaskParticipants([]); setNewTaskParent(''); setNewTaskLinkedTasks([]); setNewTaskFiles([]); setNewTaskIsMilestone(false);
     } catch (error) { alert(`Ошибка: ${JSON.stringify(error.response?.data)}`); }
   };
 
   const handleTaskClick = (task) => {
     setEditingTask(task);
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
+    const executorId = task.executor && typeof task.executor === 'object' ? task.executor.id : task.executor;
 
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
-      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, participants: task.participants || [], priority: task.priority || 'medium',
+      plan_end_date: task.plan_end_date || '',
+      assignee: assigneeId || null,
+      executor: executorId || null, // <-- Добавлен Исполнитель
+      participants: task.participants || [], priority: task.priority || 'medium',
+      law_type: task.law_type || 'other',
       linked_tasks: task.linked_tasks || task.dependencies || [],
       is_milestone: task.is_milestone || false
     });
@@ -564,19 +555,7 @@ function ProjectDetail() {
       const response = await api.patch(`tasks/${editingTask.id}/`, payloadToUpdate);
       let updatedTask = response.data;
 
-      if (editingTask.status !== editFormData.status) {
-        const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-        let autoText = '';
-        if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
-        if (editFormData.status === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
-        if (editFormData.status === 'delayed') autoText = `⏸️ ${fullName} перевел(а) задачу в отсрочку`;
-        if (editFormData.status === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
-
-        if (autoText) {
-          const commentRes = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: autoText });
-          updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
-        }
-      }
+      // Примечание: Генерация авто-комментариев теперь происходит на бэкенде.
 
       setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? updatedTask : t));
       setIsEditModalOpen(false); setEditingTask(null);
@@ -624,6 +603,8 @@ function ProjectDetail() {
     if (!editingTask) return;
 
     const assigneeId = editingTask.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id : editingTask.assignee;
+    const executorId = editingTask.executor && typeof editingTask.executor === 'object' ? editingTask.executor.id : editingTask.executor;
+
     setDupTaskTitle(`${editingTask.title} (Копия)`);
     setDupTaskDescription(editingTask.description || '');
     setDupTaskStatus('new');
@@ -631,6 +612,7 @@ function ProjectDetail() {
     setDupTaskPlanStart(editingTask.plan_start_date || '');
     setDupTaskPlanEnd(editingTask.plan_end_date || '');
     setDupTaskAssignee(assigneeId || null);
+    setDupTaskExecutor(executorId || null); // <-- Исполнитель
     setDupTaskParticipants(editingTask.participants || []);
     setDupTaskProject(editingTask.project || parseInt(id));
     setDupTaskIsMilestone(editingTask.is_milestone || false);
@@ -658,6 +640,7 @@ function ProjectDetail() {
       priority: dupTaskPriority,
       project: parseInt(dupTaskProject),
       assignee: dupTaskAssignee,
+      executor: dupTaskExecutor, // <-- Добавлен исполнитель
       participants: dupTaskParticipants,
       is_milestone: dupTaskIsMilestone
     };
@@ -694,7 +677,10 @@ function ProjectDetail() {
     (project?.visibility === 'selected' && project?.allowed_users?.includes(currentUser?.id)) ||
     (project?.visibility === 'all' && isRoleManager);
 
-  const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
+  const isWorkerTask =
+    (editingTask?.assignee && (editingTask.assignee.id == currentUser?.id || editingTask.assignee == currentUser?.id)) ||
+    (editingTask?.executor && (editingTask.executor.id == currentUser?.id || editingTask.executor == currentUser?.id));
+
   const isParticipantTask = (editingTask?.participants || []).includes(currentUser?.id);
 
   const canEditAll = isBossAll;
@@ -774,7 +760,7 @@ function ProjectDetail() {
               options={userOptions}
               value={userOptions.find(o => o.value === filterAssignee) || null}
               onChange={(opt) => setFilterAssignee(opt ? opt.value : null)}
-              placeholder="👤 Исполнитель..."
+              placeholder="👤 Ответственный..."
               isClearable
               styles={{
                 control: (base) => ({ ...base, minHeight: '34px', height: '34px', borderRadius: '0.5rem' }),
@@ -911,7 +897,7 @@ function ProjectDetail() {
       {/* === МОДАЛКА ПРОСМОТРА И РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1200px] h-[90vh] flex flex-col overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] h-[90vh] flex flex-col overflow-hidden">
             <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
 
               {/* РЕЖИМ ПОЛНОГО РЕДАКТИРОВАНИЯ */}
@@ -948,8 +934,10 @@ function ProjectDetail() {
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                        <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                        <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Исполнитель</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.executor?.id ?? editFormData.executor)) || null} onChange={(opt) => setEditFormData({...editFormData, executor: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                        <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                         <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Связанные задачи</label><Select isMulti options={taskSelectOptions.filter(opt => opt.value !== editingTask.id)} value={taskSelectOptions.filter(opt => (editFormData.linked_tasks || []).includes(opt.value))} onChange={(selected) => setEditFormData({...editFormData, linked_tasks: selected ? selected.map(s => s.value) : []})} placeholder="Добавить связь..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+
                         <div>
                           <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label>
                           <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
@@ -960,6 +948,15 @@ function ProjectDetail() {
                           </select>
                         </div>
                         <div>
+                          <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Тип правового отдела</label>
+                          <select value={editFormData.law_type} onChange={(e) => setEditFormData({...editFormData, law_type: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
+                            <option value="other">⚪ Другое</option>
+                            <option value="shareholders">👥 Дольщики</option>
+                            <option value="claims">📄 Претензии</option>
+                            <option value="courts">⚖️ Суды</option>
+                          </select>
+                        </div>
+                        <div className="sm:col-span-2">
                           <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label>
                           <select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select>
                         </div>
@@ -976,31 +973,31 @@ function ProjectDetail() {
                       <div className="flex flex-wrap gap-2 mb-3">
                         {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
                           <div key={att.id} className="relative text-xs bg-white border border-gray-200 p-2.5 rounded-xl flex flex-col shadow-sm min-w-[150px] max-w-xs group hover:border-blue-300 transition-all">
-                              {canInteract && (
-                                <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>
-                              )}
-                              <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
-                                <span className="mr-2 text-base shrink-0">📄</span>
-                                <span className="truncate" title={att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}>
-                                  {att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}
-                                </span>
-                              </a>
+                            {canInteract && (
+                              <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10" title="Удалить">✕</button>
+                            )}
+                            <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
+                              <span className="mr-2 text-base shrink-0">📄</span>
+                              <span className="truncate" title={att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}>
+                                {att.file ? decodeURIComponent(att.file.split('/').pop()) : `Файл`}
+                              </span>
+                            </a>
 
-                              <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
-                                <span className="truncate text-gray-500 flex items-center gap-1">
-                                  <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
+                            <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
+                              <span className="truncate text-gray-500 flex items-center gap-1">
+                                <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
+                              </span>
+                              {att.upload_at && (
+                                <span className="flex items-center gap-1">
+                                  <span>🕒</span>
+                                  {new Date(att.upload_at).toLocaleDateString('ru-RU', {
+                                    day: '2-digit', month: '2-digit', year: '2-digit',
+                                    hour: '2-digit', minute: '2-digit'
+                                  })}
                                 </span>
-                                {att.upload_at && (
-                                  <span className="flex items-center gap-1">
-                                    <span>🕒</span>
-                                    {new Date(att.upload_at).toLocaleDateString('ru-RU', {
-                                      day: '2-digit', month: '2-digit', year: '2-digit',
-                                      hour: '2-digit', minute: '2-digit'
-                                    })}
-                                  </span>
-                                )}
-                              </div>
+                              )}
                             </div>
+                          </div>
                         )) : <span className="text-xs text-gray-400 italic">Файлов нет</span>}
                       </div>
                       {canInteract && <input type="file" onChange={handleFileUpload} className="text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer w-full" />}
@@ -1018,7 +1015,6 @@ function ProjectDetail() {
                         return (
                           <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                             <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                              {/* --- ШАПКА СООБЩЕНИЯ С ИМЕНЕМ И ДАТОЙ --- */}
                               <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
                                 {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
                                 {c.created_at && (
@@ -1030,7 +1026,6 @@ function ProjectDetail() {
                                   </span>
                                 )}
                               </div>
-                              {/* -------------------------------------- */}
                               <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                             </div>
                           </div>
@@ -1064,7 +1059,6 @@ function ProjectDetail() {
                       <div className="flex items-center gap-2 ml-auto">
                         <button onClick={handleOpenDuplicateModal} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1">📑 Дублировать</button>
 
-                        {/* КНОПКА ПЕРЕКЛЮЧЕНИЯ В РЕЖИМ РЕДАКТИРОВАНИЯ */}
                         {canEditAll && (
                           <button onClick={() => setIsEditMode(true)} className="text-xs bg-white hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm flex items-center gap-1.5">
                             <span>✏️</span> Редактировать
@@ -1087,7 +1081,6 @@ function ProjectDetail() {
                         return (
                           <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                             <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                              {/* --- ШАПКА СООБЩЕНИЯ С ИМЕНЕМ И ДАТОЙ --- */}
                               <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
                                 {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
                                 {c.created_at && (
@@ -1099,7 +1092,6 @@ function ProjectDetail() {
                                   </span>
                                 )}
                               </div>
-                              {/* -------------------------------------- */}
                               <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                             </div>
                           </div>
@@ -1140,18 +1132,15 @@ function ProjectDetail() {
 
                     <div className="space-y-4 mb-6">
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span>
-                        <span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span>
-                      </div>
-                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span>
-                        <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span>
-                      </div>
-                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
                       </div>
-                      {/* === БЛОК УЧАСТНИКОВ === */}
+
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Исполнитель</span>
+                        <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.executor?.id ?? editingTask.executor))?.label || 'Не назначен'}</span>
+                      </div>
+
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Участники</span>
                         {editingTask.participants && editingTask.participants.length > 0 ? (
@@ -1174,11 +1163,21 @@ function ProjectDetail() {
                           <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
                         )}
                       </div>
-                      {/* ======================= */}
-                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                        <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span>
-                        <span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {project?.title || editingTask.project}</Link></span>
+
+                      {/* ТИП ПРАВОВОГО ОТДЕЛА */}
+                      <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
+                        <span className="block text-[10px] text-purple-500 font-bold uppercase tracking-wider mb-1">Тип правового отдела</span>
+                        <span className="text-sm font-semibold text-purple-900">
+                          {editingTask.law_type === 'shareholders' && '👥 Дольщики'}
+                          {editingTask.law_type === 'claims' && '📄 Претензии'}
+                          {editingTask.law_type === 'courts' && '⚖️ Суды'}
+                          {(editingTask.law_type === 'other' || !editingTask.law_type) && '⚪ Другое'}
+                        </span>
                       </div>
+
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span><span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span></div>
+                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100"><span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span><span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {project?.title || editingTask.project}</Link></span></div>
                     </div>
 
                     <div className="mb-6 flex-1">
@@ -1225,7 +1224,6 @@ function ProjectDetail() {
               )}
             </div>
 
-            {/* ПАНЕЛЬ КНОПОК ПОД МОДАЛКОЙ */}
             <div className="bg-gray-50 border-t border-gray-200 p-4 flex flex-col sm:flex-row justify-end gap-3 flex-shrink-0">
               {canEditAll && isEditMode ? (
                 <>
@@ -1239,7 +1237,6 @@ function ProjectDetail() {
                 </>
               )}
             </div>
-
           </div>
         </div>
       )}
@@ -1284,6 +1281,7 @@ function ProjectDetail() {
                 </div>
 
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == dupTaskAssignee) || null} onChange={(opt) => setDupTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Исполнитель</label><Select options={userOptions} value={userOptions.find(o => o.value == dupTaskExecutor) || null} onChange={(opt) => setDupTaskExecutor(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                 <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => dupTaskParticipants.includes(o.value))} onChange={(selected) => setDupTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                 <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label><select value={dupTaskPriority} onChange={(e) => setDupTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
               </div>
@@ -1308,8 +1306,17 @@ function ProjectDetail() {
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
             <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
             <form onSubmit={handleConfirmCompletion}>
-              <textarea value={completionDelayReason} onChange={(e) => setCompletionDelayReason(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words" placeholder="Укажите причину..." required />
-              <div className="flex justify-end gap-3"><button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button></div>
+              <textarea
+                value={completionDelayReason}
+                onChange={(e) => setCompletionDelayReason(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words"
+                placeholder="Укажите причину просрочки..."
+                required
+              />
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button>
+                <button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button>
+              </div>
             </form>
           </div>
         </div>
@@ -1341,7 +1348,8 @@ function ProjectDetail() {
                 </div>
 
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Исполнитель</label><Select options={userOptions} value={userOptions.find(o => o.value == newTaskExecutor) || null} onChange={(opt) => setNewTaskExecutor(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                 <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Связанные задачи</label><Select isMulti options={taskSelectOptions} value={taskSelectOptions.filter(o => newTaskLinkedTasks.includes(o.value))} onChange={(selected) => setNewTaskLinkedTasks(selected ? selected.map(s => s.value) : [])} placeholder="Выберите задачи..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                 <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Критичность</label><select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
               </div>
