@@ -169,9 +169,7 @@ function Layout({ children, onLogout }) {
           <Link to="/projects" className={`${baseClasses} ${checkIsActive('/projects') ? activeClasses : inactiveClasses}`}>Проекты</Link>
           <Link to="/my-tasks" className={`${baseClasses} ${checkIsActive('/my-tasks') ? activeClasses : inactiveClasses}`}>Мои задачи</Link>
           <Link to="/employees" className={`${baseClasses} ${checkIsActive('/employees') ? activeClasses : inactiveClasses}`}>Сотрудники</Link>
-          <Link to="/tickets" className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
-  <span>🎧</span> Заявки ПО
-</Link>
+          <Link to="/tickets" className={`${baseClasses} ${checkIsActive('/tickets') ? activeClasses : inactiveClasses}`}>Заявки ПО</Link>
         </nav>
         <div className="p-4 border-t border-slate-700 shrink-0">
           <button onClick={onLogout} className="w-full px-4 py-2 text-left text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors font-medium">🚪 Выйти</button>
