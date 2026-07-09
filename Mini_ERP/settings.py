@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'apps.accounts.apps.AccountsConfig',
     'apps.projects.apps.ProjectsConfig',
+    'apps.support',
     'django_filters',
 ]
 
