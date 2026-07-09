@@ -40,6 +40,7 @@ function Dashboard() {
   const [newTaskPlanStart, setNewTaskPlanStart] = useState('');
   const [newTaskPlanEnd, setNewTaskPlanEnd] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
+  const [newTaskExecutor, setNewTaskExecutor] = useState(null); // <-- Добавлен исполнитель
   const [newTaskParticipants, setNewTaskParticipants] = useState([]);
   const [newTaskProject, setNewTaskProject] = useState(null);
   const [newTaskFiles, setNewTaskFiles] = useState([]);
@@ -193,7 +194,10 @@ function Dashboard() {
     if (!newTaskProject) return alert("Пожалуйста, выберите проект для задачи!");
     const payload = {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
-      project: parseInt(newTaskProject), plan_end_date: newTaskPlanEnd, assignee: newTaskAssignee, participants: newTaskParticipants,
+      project: parseInt(newTaskProject), plan_end_date: newTaskPlanEnd,
+      assignee: newTaskAssignee,
+      executor: newTaskExecutor, // <-- Отправляем Исполнителя
+      participants: newTaskParticipants,
       is_milestone: newTaskIsMilestone
     };
     if (newTaskPlanStart) payload.plan_start_date = newTaskPlanStart;
@@ -209,18 +213,25 @@ function Dashboard() {
       }
       fetchDashboardMetricsAndTasks(1);
       setIsTaskModalOpen(false);
-      setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd(''); setNewTaskAssignee(null); setNewTaskParticipants([]); setNewTaskProject(null); setNewTaskFiles([]); setNewTaskIsMilestone(false);
+      setNewTaskTitle(''); setNewTaskDescription(''); setNewTaskPlanStart(''); setNewTaskPlanEnd('');
+      setNewTaskAssignee(null); setNewTaskExecutor(null); setNewTaskParticipants([]); setNewTaskProject(null); setNewTaskFiles([]); setNewTaskIsMilestone(false);
     } catch (error) { alert("Ошибка при создании задачи."); }
   };
 
   const handleTaskClick = (task) => {
     setEditingTask(task);
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
+    const executorId = task.executor && typeof task.executor === 'object' ? task.executor.id : task.executor;
+
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
-      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, priority: task.priority || 'medium', participants: task.participants || [],
+      plan_end_date: task.plan_end_date || '',
+      assignee: assigneeId || null,
+      executor: executorId || null, // <-- Исполнитель в стейте формы
+      priority: task.priority || 'medium', participants: task.participants || [],
       project: task.project || null,
-      is_milestone: task.is_milestone || false
+      is_milestone: task.is_milestone || false,
+      law_type: task.law_type || 'other'
     });
     setNewCommentText('');
     setIsEditMode(false);
@@ -237,7 +248,12 @@ function Dashboard() {
 
     // === ЛОГИКА ДЛЯ УЧАСТНИКОВ ===
     const isParticipant = (editingTask.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
-    const isWorker = editingTask.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask.assignee == currentUser?.id;
+
+    // Обновленная логика определения прав исполнителя
+    const isWorker =
+      (editingTask.assignee && (typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask.assignee == currentUser?.id)) ||
+      (editingTask.executor && (typeof editingTask.executor === 'object' ? editingTask.executor.id == currentUser?.id : editingTask.executor == currentUser?.id));
+
     const taskProject = projects.find(p => p.id === editingTask.project);
     const isBoss = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) || (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
 
@@ -253,6 +269,7 @@ function Dashboard() {
       const response = await api.patch(`tasks/${editingTask.id}/`, payload);
       let updatedTask = response.data;
 
+      // Авто-комментарии (зависят от статуса)
       if (editingTask.status !== editFormData.status) {
          const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
          let autoText = '';
@@ -276,7 +293,12 @@ function Dashboard() {
     if (!completionDelayReason.trim()) return alert("Необходимо указать причину просрочки!");
 
     const isParticipant = (taskToComplete.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
-    const isWorker = taskToComplete.assignee && typeof taskToComplete.assignee === 'object' ? taskToComplete.assignee.id == currentUser?.id : taskToComplete.assignee == currentUser?.id;
+
+    // Обновленная логика для исполнителя
+    const isWorker =
+      (taskToComplete.assignee && (typeof taskToComplete.assignee === 'object' ? taskToComplete.assignee.id == currentUser?.id : taskToComplete.assignee == currentUser?.id)) ||
+      (taskToComplete.executor && (typeof taskToComplete.executor === 'object' ? taskToComplete.executor.id == currentUser?.id : taskToComplete.executor == currentUser?.id));
+
     const taskProject = projects.find(p => p.id === taskToComplete.project);
     const isBoss = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) || (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
 
@@ -343,20 +365,22 @@ function Dashboard() {
     (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) ||
     (taskProject?.visibility === 'all' && isRoleManager);
 
-  const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
+  // Права исполнителя и ответственного
+  const isWorkerTask =
+    (editingTask?.assignee && (editingTask.assignee.id == currentUser?.id || editingTask.assignee == currentUser?.id)) ||
+    (editingTask?.executor && (editingTask.executor.id == currentUser?.id || editingTask.executor == currentUser?.id));
+
   const isParticipantTask = (editingTask?.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
+
+  // Определяем, является ли юзер юристом (для скрытия поля law_type, если оно вам нужно в Дашборде)
+  const isLegal = isFullAccess || (
+    Array.isArray(currentUser?.departments)
+      ? currentUser.departments.some(dep => dep === 'Юридический отдел' || dep?.name === 'Юридический отдел')
+      : currentUser?.department === 'Юридический отдел' || currentUser?.department?.name === 'Юридический отдел'
+  );
 
   const canEditAll = isBossAll;
   const canInteract = true;
-
-  const getPriorityInfo = (priority) => {
-    switch(priority) {
-      case 'critical': return { label: 'Критичная', color: 'text-red-700 bg-red-100', icon: '🔴' };
-      case 'high': return { label: 'Высокая', color: 'text-purple-700 bg-purple-100', icon: '🟣' };
-      case 'low': return { label: 'Низкая', color: 'text-green-700 bg-green-100', icon: '🟢' };
-      default: return { label: 'Средняя', color: 'text-blue-700 bg-blue-100', icon: '🔵' };
-    }
-  };
 
   const chartData = [
     { name: 'Новые', value: metrics.new_tasks, color: '#9CA3AF' },
@@ -599,7 +623,9 @@ function Dashboard() {
                             <Select options={projectOptions} value={projectOptions.find(o => o.value == editFormData.project) || null} onChange={(opt) => setEditFormData({...editFormData, project: opt ? opt.value : null})} placeholder="Выбрать проект..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} />
                           </div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Исполнитель</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.executor?.id ?? editFormData.executor)) || null} onChange={(opt) => setEditFormData({...editFormData, executor: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                          <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+
                           <div>
                             <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label>
                             <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
@@ -609,7 +635,18 @@ function Dashboard() {
                               <option value="completed">Завершена</option>
                             </select>
                           </div>
-                          <div>
+                          {isLegal && (
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Тип правового отдела</label>
+                              <select value={editFormData.law_type} onChange={(e) => setEditFormData({...editFormData, law_type: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
+                                <option value="other">⚪ Другое</option>
+                                <option value="shareholders">👥 Дольщики</option>
+                                <option value="claims">📄 Претензии</option>
+                                <option value="courts">⚖️ Суды</option>
+                              </select>
+                            </div>
+                          )}
+                          <div className="sm:col-span-2">
                             <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label>
                             <select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select>
                           </div>
@@ -627,7 +664,7 @@ function Dashboard() {
                           {editingTask.attachments && editingTask.attachments.length > 0 ? editingTask.attachments.map(att => (
                             <div key={att.id} className="relative text-xs bg-white border border-gray-200 p-2.5 rounded-xl flex flex-col shadow-sm min-w-[150px] max-w-xs group hover:border-blue-300 transition-all">
                               {canInteract && (
-                                <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10">✕</button>
+                                <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="absolute -top-2 -right-2 bg-white border border-gray-200 text-red-500 rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-200 shadow-sm font-bold z-10" title="Удалить">✕</button>
                               )}
                               <a href={att.file} target="_blank" rel="noreferrer" className="flex items-center font-semibold text-gray-700 hover:text-blue-600 truncate break-words mb-1.5">
                                 <span className="mr-2 text-base shrink-0">📄</span>
@@ -636,7 +673,6 @@ function Dashboard() {
                                 </span>
                               </a>
 
-                              {/* === ИНФОРМАЦИЯ ОБ АВТОРЕ И ДАТЕ ЗАГРУЗКИ === */}
                               <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 mt-auto flex flex-col gap-0.5 font-medium">
                                 <span className="truncate text-gray-500 flex items-center gap-1">
                                   <span>👤</span> {att.uploaded_by_name || 'Сотрудник'}
@@ -661,22 +697,31 @@ function Dashboard() {
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 min-h-0">
                     <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200"><h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4></div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                      {editingTask.comments && editingTask.comments.length > 0 ? (
-                        editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name && (
-                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
-                            (currentUser.username && c.author_name.includes(currentUser.username))
-                          );
-                          return (
-                            <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                              <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                                {!isMe && <div className="font-bold text-xs text-blue-600 mb-1">{c.author_name}</div>}
-                                <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                      {editingTask.comments?.map(c => {
+                        const isMe = currentUser && c.author_name && (
+                          (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                          (currentUser.username && c.author_name.includes(currentUser.username))
+                        );
+                        return (
+                          <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                            <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
+                              <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
+                                {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
+                                {c.created_at && (
+                                  <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
+                                    {new Date(c.created_at).toLocaleString('ru-RU', {
+                                      day: '2-digit', month: '2-digit', year: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                )}
                               </div>
+                              <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                             </div>
-                          );
-                        })
-                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
+                          </div>
+                        );
+                      })}
+                      {(!editingTask.comments || editingTask.comments.length === 0) && <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
                     </div>
                     {canInteract && (
                       <div className="p-4 bg-white border-t border-gray-200 flex-shrink-0">
@@ -696,42 +741,48 @@ function Dashboard() {
                     <div className="p-6 md:px-8 pb-4 flex-shrink-0 border-b border-gray-200 bg-white">
                       <div className="flex items-center gap-2 mb-4">
                         <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
-                        <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wide ${isWorkerTask ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}</span>
+                        <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wide ${isWorkerTask ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{isWorkerTask ? '👷‍♂️ Исполнитель/Ответственный' : '👀 Участник'}</span>
                         {canEditAll && (
                           <button onClick={() => setIsEditMode(true)} className="ml-auto text-xs bg-white hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm flex items-center gap-1.5">
                             <span>✏️</span> Редактировать
                           </button>
                         )}
                       </div>
-                      <h2 className="text-2xl font-extrabold text-gray-900 leading-tight break-words">
-                        {editingTask.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
-                        {editingTask.title}
-                      </h2>
+                      <h2 className="text-2xl font-extrabold text-gray-900 leading-tight break-words">{editingTask.is_milestone && <span className="mr-2" title="Веха">🚩</span>}{editingTask.title}</h2>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
-                      {editingTask.comments && editingTask.comments.length > 0 ? (
-                        editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name && (
-                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
-                            (currentUser.username && c.author_name.includes(currentUser.username))
-                          );
-                          return (
-                            <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                              <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                                {!isMe && <div className="font-bold text-xs text-blue-600 mb-1">{c.author_name}</div>}
-                                <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                      {editingTask.comments?.map(c => {
+                        const isMe = currentUser && c.author_name && (
+                          (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                          (currentUser.username && c.author_name.includes(currentUser.username))
+                        );
+                        return (
+                          <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                            <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
+                              <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
+                                {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
+                                {c.created_at && (
+                                  <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
+                                    {new Date(c.created_at).toLocaleString('ru-RU', {
+                                      day: '2-digit', month: '2-digit', year: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                )}
                               </div>
+                              <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                             </div>
-                          );
-                        })
-                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium">Здесь пока тихо. Напишите первым!</p></div>}
+                          </div>
+                        );
+                      })}
+                      {(!editingTask.comments || editingTask.comments.length === 0) && <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
                     </div>
 
                     {canInteract && (
                       <div className="p-6 bg-white border-t border-gray-200 flex-shrink-0">
                         <div className="bg-slate-50 p-3 rounded-xl border border-gray-200 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
-                          <textarea value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Написать сообщение участникам..." className="w-full text-sm outline-none resize-none min-h-[60px] break-words bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddComment(e); }} />
+                          <textarea value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Сообщение участникам..." className="w-full text-sm outline-none resize-none min-h-[60px] break-words bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAddComment(e); }} />
                           <div className="flex justify-between items-center mt-2 border-t border-gray-100 pt-3">
                             <span className="text-xs text-gray-400 hidden sm:inline font-medium">Ctrl + Enter для отправки</span>
                             <button onClick={handleAddComment} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 shadow-sm w-full sm:w-auto">Отправить</button>
@@ -753,15 +804,23 @@ function Dashboard() {
                           </select>
                         </form>
                       ) : (
-                        <div className="text-sm font-semibold text-gray-800">{editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}</div>
+                        <div className="text-sm font-semibold text-gray-800">
+                          {editingTask.status === 'new' ? '🆕 Новая' :
+                           editingTask.status === 'in_progress' ? '⚙️ В работе' :
+                           editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}
+                        </div>
                       )}
                     </div>
 
                     <div className="space-y-4 mb-6">
-                      {/* === БЛОК ОТВЕТСТВЕННОГО И УЧАСТНИКОВ === */}
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
+                      </div>
+
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Исполнитель</span>
+                        <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.executor?.id ?? editingTask.executor))?.label || 'Не назначен'}</span>
                       </div>
 
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
@@ -787,7 +846,19 @@ function Dashboard() {
                         )}
                       </div>
 
-                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' && editingTask.status !== 'delayed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
+                      {isLegal && (
+                        <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
+                          <span className="block text-[10px] text-purple-500 font-bold uppercase tracking-wider mb-1">Тип правового отдела</span>
+                          <span className="text-sm font-semibold text-purple-900">
+                            {editingTask.law_type === 'shareholders' && '👥 Дольщики'}
+                            {editingTask.law_type === 'claims' && '📄 Претензии'}
+                            {editingTask.law_type === 'courts' && '⚖️ Суды'}
+                            {(editingTask.law_type === 'other' || !editingTask.law_type) && '⚪ Другое'}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span><span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span></div>
                       <div className="bg-blue-50 p-3 rounded-lg border border-blue-100"><span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span><span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {taskProject?.title || editingTask.project}</Link></span></div>
                     </div>
@@ -849,8 +920,17 @@ function Dashboard() {
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
             <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
             <form onSubmit={handleConfirmCompletion}>
-              <textarea value={completionDelayReason} onChange={(e) => setCompletionDelayReason(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words" placeholder="Укажите причину..." required />
-              <div className="flex justify-end gap-3"><button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button></div>
+              <textarea
+                value={completionDelayReason}
+                onChange={(e) => setCompletionDelayReason(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words"
+                placeholder="Укажите причину просрочки..."
+                required
+              />
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button>
+                <button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button>
+              </div>
             </form>
           </div>
         </div>
@@ -896,7 +976,8 @@ function Dashboard() {
                 </div>
 
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == newTaskAssignee) || null} onChange={(opt) => setNewTaskAssignee(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Исполнитель</label><Select options={userOptions} value={userOptions.find(o => o.value == newTaskExecutor) || null} onChange={(opt) => setNewTaskExecutor(opt ? opt.value : null)} placeholder="Выбрать..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                <div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => newTaskParticipants.includes(o.value))} onChange={(selected) => setNewTaskParticipants(selected ? selected.map(s => s.value) : [])} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Статус</label>

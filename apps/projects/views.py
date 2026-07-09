@@ -729,7 +729,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         today = date.today()
 
         # Теперь мы ищем задачи, где пользователь - Исполнитель ИЛИ Участник
-        base_query = Q(assignee=user) | Q(participants=user)
+        base_query = Q(assignee=user) | Q(participants=user) | Q(executor=user)
 
         metrics = Task.objects.filter(base_query).distinct().aggregate(
             total=Count('id'),

@@ -424,7 +424,13 @@ function MyTasks() {
     (editingTask?.executor && (editingTask.executor.id == currentUser?.id || editingTask.executor == currentUser?.id));
 
   const isParticipantTask = checkIsParticipant(editingTask?.participants, currentUser?.id);
-
+  const isLegal = isFullAccess || (
+  Array.isArray(currentUser?.departments)
+    ? currentUser.departments.some(dep =>
+        dep === 'Юридический отдел' || dep?.name === 'Юридический отдел'
+      )
+    // На случай, если API всё еще отдает старое поле department как строку или ID
+    : currentUser?.department === 'Юридический отдел' || currentUser?.department?.name === 'Юридический отдел');
   const canEditAll = isBossAll;
   const canInteract = true;
 
@@ -465,7 +471,9 @@ function MyTasks() {
         <div className="flex flex-col sm:flex-row flex-wrap items-center gap-3 w-full xl:w-auto shrink-0">
           <div className="flex bg-gray-100 p-1 rounded-xl shadow-inner border border-gray-200 w-full sm:w-auto">
             <button onClick={() => setViewMode('kanban')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Канбан</button>
-            <button onClick={() => setViewMode('types')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'types' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Типы задач</button>
+            {isLegal && (
+              <button onClick={() => setViewMode('types')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'types' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Типы задач</button>
+            )}
             <button onClick={() => setViewMode('list')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Список</button>
             <button onClick={() => setViewMode('calendar')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Календарь</button>
           </div>
@@ -563,7 +571,7 @@ function MyTasks() {
         </DragDropContext>
       )}
 
-      {/* 2. ВИД: СПИСОК (ОБНОВЛЕННЫЙ С НОВЫМИ КОЛОНКАМИ) */}
+      {/* 2. ВИД: СПИСОК (ОБНОВЛЕННЫЙ С НОВЫМИ КОЛОНКАМИ И СКРЫТЫМ БЕЙДЖЕМ) */}
       {viewMode === 'list' && (
         <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
           <div className="overflow-x-auto flex-1">
@@ -624,7 +632,8 @@ function MyTasks() {
                             {task.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
                             {task.title}
                           </div>
-                          {task.law_type && task.law_type !== 'other' && (
+                          {/* Скрываем бейдж от тех, кто не юрист */}
+                          {isLegal && task.law_type && task.law_type !== 'other' && (
                             <span className="inline-block text-[10px] bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded mt-1 font-semibold">
                               {task.law_type === 'shareholders' ? '👥 Дольщики' : task.law_type === 'claims' ? '📄 Претензии' : '⚖️ Суды'}
                             </span>
@@ -733,14 +742,17 @@ function MyTasks() {
                               <option value="completed">Завершена</option>
                             </select>
                           </div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Тип правового отдела</label>
-                            <select value={editFormData.law_type} onChange={(e) => setEditFormData({...editFormData, law_type: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
-                              <option value="other">⚪ Другое</option>
-                              <option value="shareholders">👥 Дольщики</option>
-                              <option value="claims">📄 Претензии</option>
-                              <option value="courts">⚖️ Суды</option>
-                            </select>
-                          </div>
+                          {/* Скрываем выбор типа от тех, кто не юрист */}
+                          {isLegal && (
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Тип правового отдела</label>
+                              <select value={editFormData.law_type} onChange={(e) => setEditFormData({...editFormData, law_type: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
+                                <option value="other">⚪ Другое</option>
+                                <option value="shareholders">👥 Дольщики</option>
+                                <option value="claims">📄 Претензии</option>
+                                <option value="courts">⚖️ Суды</option>
+                              </select>
+                            </div>
+                          )}
                           <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label><select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -938,15 +950,18 @@ function MyTasks() {
                         )}
                       </div>
 
-                      <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
-                        <span className="block text-[10px] text-purple-500 font-bold uppercase tracking-wider mb-1">Тип правового отдела</span>
-                        <span className="text-sm font-semibold text-purple-900">
-                          {editingTask.law_type === 'shareholders' && '👥 Дольщики'}
-                          {editingTask.law_type === 'claims' && '📄 Претензии'}
-                          {editingTask.law_type === 'courts' && '⚖️ Суды'}
-                          {(editingTask.law_type === 'other' || !editingTask.law_type) && '⚪ Другое'}
-                        </span>
-                      </div>
+                      {/* Скрываем фиолетовый блок от тех, кто не юрист */}
+                      {isLegal && (
+                        <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
+                          <span className="block text-[10px] text-purple-500 font-bold uppercase tracking-wider mb-1">Тип правового отдела</span>
+                          <span className="text-sm font-semibold text-purple-900">
+                            {editingTask.law_type === 'shareholders' && '👥 Дольщики'}
+                            {editingTask.law_type === 'claims' && '📄 Претензии'}
+                            {editingTask.law_type === 'courts' && '⚖️ Суды'}
+                            {(editingTask.law_type === 'other' || !editingTask.law_type) && '⚪ Другое'}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span><span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span></div>
