@@ -10,6 +10,7 @@ import Projects from './components/Projects';
 import ProjectDetail from './components/ProjectDetail';
 import MyTasks from './components/MyTasks';
 import TaskStandalone from './components/TaskStandalone';
+import Tickets from './components/Tickets';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -104,6 +105,7 @@ function App() {
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/my-tasks" element={<MyTasks />} />
           <Route path="/employees" element={<Employees />} />
+          <Route path="/tickets" element={<Tickets />} />
           {/* Скрытый маршрут для отдельной задачи */}
           <Route path="/task/:id" element={<TaskStandalone />} />
 
