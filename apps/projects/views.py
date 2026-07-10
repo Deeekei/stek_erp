@@ -33,7 +33,7 @@ from rest_framework.exceptions import PermissionDenied
 User = get_user_model()
 
 
-def notify_user(user, title, message, link=None):
+def notify_user(user, title, message, link=None, send_email=True):
     """
     Создает уведомление в БД, отправляет Email и Web Push.
     """
@@ -48,7 +48,7 @@ def notify_user(user, title, message, link=None):
     )
 
     # 2. Отправляем письмо через Celery
-    if getattr(user, 'email', None):
+    if send_email and getattr(user, 'email', None):
         try:
             send_notification_email.delay(user.email, title, message)
         except Exception:
@@ -761,17 +761,34 @@ class TaskViewSet(viewsets.ModelViewSet):
         if serializer.is_valid():
             serializer.save(task=task, author=request.user)
 
-            if task.assignee and task.assignee != request.user:
-                author_name = request.user.get_full_name() or request.user.username
-                # Добавляем ссылки для уведомления о комментарии
-                task_link = f"/task/{task.id}"
-                full_url = f"https://erp.stekufa.ru{task_link}"
+            author_name = request.user.get_full_name() or request.user.username
+            task_link = f"/task/{task.id}"
+            full_url = f"https://erp.stekufa.ru{task_link}"
 
+            # 1. Собираем уникальный список всех, кто причастен к задаче
+            users_to_notify = set()
+
+            if task.assignee:
+                users_to_notify.add(task.assignee)
+
+            if getattr(task, 'executor', None):
+                users_to_notify.add(task.executor)
+
+            for participant in task.participants.all():
+                users_to_notify.add(participant)
+
+            # 2. Исключаем из рассылки автора комментария
+            if request.user in users_to_notify:
+                users_to_notify.remove(request.user)
+
+            # 3. Отправляем уведомления всем собранным пользователям
+            for target_user in users_to_notify:
                 notify_user(
-                    user=task.assignee,
-                    title="Новый комментарий",
-                    message=f"В вашей задаче '{task.title}' появился новый комментарий от {author_name}.\nПерейти к задаче: {full_url}",
-                    link=task_link
+                    user=target_user,
+                    title="💬 Новый комментарий",
+                    message=f"{author_name} оставил(а) комментарий в задаче '{task.title}'.\nПерейти к задаче: {full_url}",
+                    link=task_link,
+                    send_email=False,
                 )
 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
