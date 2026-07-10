@@ -21,7 +21,6 @@ function Tickets() {
 
   // МАССИВ ВЛОЖЕНИЙ
   const [attachments, setAttachments] = useState([]);
-  const fileInputRef = useRef(null);
 
   const [filterModule, setFilterModule] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -62,7 +61,7 @@ function Tickets() {
   // === ВСТАВКА ИЗ БУФЕРА ОБМЕНА (Ctrl+V) ===
   useEffect(() => {
     const handlePaste = (e) => {
-      if (activeTab !== 'create') return; // Слушаем только на вкладке создания
+      if (activeTab !== 'create') return;
 
       const items = e.clipboardData?.items;
       if (!items) return;
@@ -71,7 +70,6 @@ function Tickets() {
       for (let i = 0; i < items.length; i++) {
         if (items[i].type.indexOf('image') !== -1) {
           const blob = items[i].getAsFile();
-          // Генерируем имя для скриншота, чтобы файлы не назывались одинаково
           const file = new File([blob], `Скриншот_${new Date().toLocaleTimeString('ru-RU').replace(/:/g, '-')}.png`, { type: blob.type });
           pastedFiles.push(file);
         }
@@ -86,12 +84,12 @@ function Tickets() {
     return () => window.removeEventListener('paste', handlePaste);
   }, [activeTab]);
 
-  // === ОБРАБОТКА МНОЖЕСТВА ФАЙЛОВ ===
+  // === ОБРАБОТКА ВЫБОРА ФАЙЛА ЧЕРЕЗ ОКНО ===
   const handleFileChange = (e) => {
-    if (e.target.files.length > 0) {
-      setAttachments(prev => [...prev, ...Array.from(e.target.files)]);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      setAttachments(prev => [...prev, ...Array.from(files)]);
     }
-    if (fileInputRef.current) fileInputRef.current.value = ''; // Сбрасываем инпут
   };
 
   const removeAttachment = (indexToRemove) => {
@@ -101,7 +99,6 @@ function Tickets() {
   const clearForm = () => {
     setModuleId(''); setUrgency('normal'); setTitle(''); setDesc(''); setAnydesk('');
     setAttachments([]);
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleSubmitTicket = async (e) => {
@@ -115,7 +112,6 @@ function Tickets() {
     formData.append('urgency', urgency);
     if (anydesk) formData.append('anydesk', anydesk.trim());
 
-    // ДОБАВЛЯЕМ ВСЕ ФАЙЛЫ В ФОРМУ
     attachments.forEach(file => {
       formData.append('attachments', file);
     });
@@ -158,16 +154,13 @@ function Tickets() {
     }
   };
 
-  // === УДАЛЕНИЕ ФАЙЛА ИЗ СОЗДАННОГО ТИКЕТА ===
   const handleDeleteAttachment = async (fileId) => {
     if (!window.confirm("Удалить этот файл навсегда?")) return;
     try {
       await api.delete(`support/tickets/${selectedTicket.id}/delete_file/${fileId}/`);
-
-      // Локально убираем файл из стейта, чтобы интерфейс обновился мгновенно
       const updatedAttachments = selectedTicket.attachments.filter(a => a.id !== fileId);
       setSelectedTicket({ ...selectedTicket, attachments: updatedAttachments });
-      fetchData(); // Фоновое обновление
+      fetchData();
     } catch (error) {
       alert("Ошибка при удалении файла.");
     }
@@ -270,19 +263,25 @@ function Tickets() {
                 <textarea value={desc} onChange={e => setDesc(e.target.value)} placeholder="Шаги для воспроизведения, что произошло..." className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] text-sm" required />
               </div>
 
-              {/* БЛОК ЗАГРУЗКИ ФАЙЛОВ (ПО ОДНОМУ) + Ctrl+V */}
+              {/* БЛОК ЗАГРУЗКИ ФАЙЛОВ */}
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Скриншоты и файлы</label>
+                <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Скриншоты и файлы</span>
 
-                {/* ИНПУТ НАРУЖИ И БЕЗ multiple */}
-                <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                <input
+                  id="ticket-file-upload"
+                  type="file"
+                  onChange={handleFileChange}
+                  onClick={(e) => { e.target.value = null; }}
+                  className="hidden"
+                />
 
-                {/* КЛИКАБЕЛЬНАЯ ЗОНА ТЕПЕРЬ ОТДЕЛЬНО */}
-                <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors border-gray-300 hover:border-blue-400 hover:bg-blue-50">
+                <label
+                  htmlFor="ticket-file-upload"
+                  className="block border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors border-gray-300 hover:border-blue-400 hover:bg-blue-50"
+                >
                   <span className="text-sm font-medium text-gray-500">📎 Нажмите, чтобы добавить файл (или нажмите <b>Ctrl+V</b> для вставки скриншота)</span>
-                </div>
+                </label>
 
-                {/* Отображение выбранных файлов перед отправкой */}
                 {attachments.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {attachments.map((file, idx) => (
@@ -415,7 +414,6 @@ function Tickets() {
                             )}
                             <span className="text-sm font-semibold text-gray-700 hover:text-blue-600 truncate">{att.file_name}</span>
                           </a>
-                          {/* Кнопка удаления файла (доступна админам или автору тикета) */}
                           {(isFullAccess || selectedTicket.author === currentUser?.id) && (
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteAttachment(att.id); }}
