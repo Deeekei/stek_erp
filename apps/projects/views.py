@@ -119,11 +119,9 @@ def calculate_finish_date(start_date_str, duration_str):
 
 class CanEditTaskPermission(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        # 1. Чтение задачи разрешено всем
         if request.method in permissions.SAFE_METHODS:
             return True
 
-        # 2. ИСКЛЮЧЕНИЯ ДЛЯ ВСЕХ: Комментарии и файлы разрешены ВООБЩЕ ЛЮБОМУ пользователю
         if view.action in ['add_comment', 'upload_files']:
             return True
 
@@ -136,43 +134,17 @@ class CanEditTaskPermission(permissions.BasePermission):
             (obj.project and obj.project.visibility == 'all' and getattr(request.user, 'role', '') == 'manager')
         )
         is_assignee = (obj.assignee == request.user)
+        # Добавляем проверку на исполнителя для прав редактирования:
+        is_executor = (getattr(obj, 'executor', None) == request.user)
         is_participant = obj.participants.filter(id=request.user.id).exists()
 
-        # 3. Скрытие задачи доступно только причастным
         if view.action == 'hide':
-            return is_boss or is_assignee or is_participant
+            return is_boss or is_assignee or is_executor or is_participant
 
-        # === НОВОЕ: Разрешаем Участникам отправлять PATCH/PUT (для смены личного статуса) ===
-        if request.method in ['PATCH', 'PUT'] and (is_boss or is_assignee or is_participant):
+        if request.method in ['PATCH', 'PUT'] and (is_boss or is_assignee or is_executor or is_participant):
             return True
 
-        # 4. Боссы и Исполнитель могут редактировать саму задачу полноценно
-        return is_boss or is_assignee
-
-        # === ПРОВЕРКА РОЛЕЙ ===
-        is_boss = (
-            getattr(request.user, 'role', '') in ['admin', 'director'] or
-            request.user.is_superuser or
-            (obj.project and obj.project.manager == request.user) or
-            (obj.project and obj.project.visibility == 'selected' and obj.project.allowed_users.filter(id=request.user.id).exists()) or
-            (obj.project and obj.project.visibility == 'all' and getattr(request.user, 'role', '') == 'manager')
-        )
-        is_assignee = (obj.assignee == request.user)
-        is_participant = obj.participants.filter(id=request.user.id).exists()
-
-        # 3. Скрытие задачи доступно только причастным (чтобы левый юзер не скрыл чужую задачу)
-        if view.action == 'hide':
-            if is_boss or is_assignee or is_participant:
-                return True
-            return False
-
-        # === ПРАВИЛА ДЛЯ РЕДАКТИРОВАНИЯ САМОЙ ЗАДАЧИ (Сроки, статусы, названия) ===
-        # 4. Боссы и Исполнитель могут редактировать саму задачу
-        if is_boss or is_assignee:
-            return True
-
-        # Всем остальным редактировать саму задачу запрещено
-        return False
+        return is_boss or is_assignee or is_executor
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -526,7 +498,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         assigned_to_me = self.request.query_params.get('assigned_to_me')
         if assigned_to_me == 'true':
-            queryset = queryset.filter(Q(assignee=user) | Q(participants=user)).distinct()
+            queryset = queryset.filter(Q(assignee=user) | Q(executor=user) | Q(participants=user)).distinct()
 
         if user.is_authenticated:
             queryset = queryset.exclude(hidden_for=user)

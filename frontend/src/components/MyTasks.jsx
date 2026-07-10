@@ -137,8 +137,9 @@ function MyTasks() {
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
+      const taskExecutorId = task.executor && typeof task.executor === 'object' ? task.executor.id : task.executor;
       const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
-      const matchAssignee = taskAssigneeId == currentUser?.id || isParticipant;
+      const matchAssignee = taskAssigneeId == currentUser?.id || taskExecutorId == currentUser?.id || isParticipant;
 
       const matchCompleted = hideCompleted ? task.status !== 'completed' : true;
 
