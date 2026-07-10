@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Select from 'react-select';
-import api from '../api'; // Твой настроенный axios instance
+import api from '../api';
 
 function Tickets() {
-  const [activeTab, setActiveTab] = useState('create'); // 'create', 'list', 'admin'
+  const [activeTab, setActiveTab] = useState('create');
   const [loading, setLoading] = useState(true);
 
-  // Данные с бэкенда
   const [modules, setModules] = useState([]);
   const [tickets, setTickets] = useState([]);
-  const [users, setUsers] = useState([]); // Для выбора исполнителей в админке
+  const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [isFullAccess, setIsFullAccess] = useState(false);
 
@@ -19,30 +18,25 @@ function Tickets() {
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [anydesk, setAnydesk] = useState('');
-  const [screenshot, setScreenshot] = useState(null);
+
+  // МАССИВ ВЛОЖЕНИЙ
+  const [attachments, setAttachments] = useState([]);
   const fileInputRef = useRef(null);
 
-  // Стейты списка
   const [filterModule, setFilterModule] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedTicket, setSelectedTicket] = useState(null);
-
-  // Стейт админки
   const [newModuleName, setNewModuleName] = useState('');
 
-  // === ЗАГРУЗКА ДАННЫХ ===
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Запрашиваем модули, тикеты и пользователей параллельно
       const [modRes, tickRes, usersRes] = await Promise.all([
         api.get('support/modules/'),
         api.get('support/tickets/'),
-        api.get('users/').catch(() => ({ data: [] })) // Если эндпоинт users другой, поправь здесь
+        api.get('users/').catch(() => ({ data: [] }))
       ]);
 
       setModules(modRes.data.results || modRes.data);
@@ -51,7 +45,6 @@ function Tickets() {
       const usersList = usersRes.data.results || usersRes.data;
       setUsers(usersList);
 
-      // Определяем права пользователя (админ может видеть вкладку "Админ" и удалять всё)
       const token = localStorage.getItem('token');
       if (token) {
         const payload = JSON.parse(atob(token.split('.')[1]));
@@ -66,13 +59,21 @@ function Tickets() {
     }
   };
 
-  // === СОЗДАНИЕ ЗАЯВКИ ===
+  // === ОБРАБОТКА МНОЖЕСТВА ФАЙЛОВ ===
   const handleFileChange = (e) => {
-    setScreenshot(e.target.files[0] || null);
+    if (e.target.files.length > 0) {
+      setAttachments(prev => [...prev, ...Array.from(e.target.files)]);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''; // Сбрасываем инпут
+  };
+
+  const removeAttachment = (indexToRemove) => {
+    setAttachments(prev => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
   const clearForm = () => {
-    setModuleId(''); setUrgency('normal'); setTitle(''); setDesc(''); setAnydesk(''); setScreenshot(null);
+    setModuleId(''); setUrgency('normal'); setTitle(''); setDesc(''); setAnydesk('');
+    setAttachments([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -86,7 +87,11 @@ function Tickets() {
     formData.append('description', desc.trim());
     formData.append('urgency', urgency);
     if (anydesk) formData.append('anydesk', anydesk.trim());
-    if (screenshot) formData.append('screenshot', screenshot);
+
+    // ДОБАВЛЯЕМ ВСЕ ФАЙЛЫ В ФОРМУ
+    attachments.forEach(file => {
+      formData.append('attachments', file);
+    });
 
     try {
       await api.post('support/tickets/', formData, {
@@ -94,7 +99,7 @@ function Tickets() {
       });
       alert("Заявка успешно создана!");
       clearForm();
-      fetchData(); // Обновляем список
+      fetchData();
       setActiveTab('list');
     } catch (error) {
       alert("Ошибка при создании заявки.");
@@ -102,7 +107,6 @@ function Tickets() {
     }
   };
 
-  // === УПРАВЛЕНИЕ ЗАЯВКАМИ ===
   const handleChangeStatus = async (ticketId, currentStatus) => {
     const nextStatus = currentStatus === 'new' ? 'progress' : currentStatus === 'progress' ? 'closed' : 'new';
     try {
@@ -127,16 +131,29 @@ function Tickets() {
     }
   };
 
-  // === АДМИНКА (МОДУЛИ) ===
+  // === УДАЛЕНИЕ ФАЙЛА ИЗ СОЗДАННОГО ТИКЕТА ===
+  const handleDeleteAttachment = async (fileId) => {
+    if (!window.confirm("Удалить этот файл навсегда?")) return;
+    try {
+      await api.delete(`support/tickets/${selectedTicket.id}/delete_file/${fileId}/`);
+
+      // Локально убираем файл из стейта, чтобы интерфейс обновился мгновенно
+      const updatedAttachments = selectedTicket.attachments.filter(a => a.id !== fileId);
+      setSelectedTicket({ ...selectedTicket, attachments: updatedAttachments });
+      fetchData(); // Фоновое обновление
+    } catch (error) {
+      alert("Ошибка при удалении файла.");
+    }
+  };
+
+  // Админка
   const handleAddModule = async () => {
     if (!newModuleName.trim()) return;
     try {
       await api.post('support/modules/', { name: newModuleName.trim(), assignees: [] });
       setNewModuleName('');
       fetchData();
-    } catch (error) {
-      alert("Ошибка при добавлении модуля.");
-    }
+    } catch (error) { alert("Ошибка при добавлении модуля."); }
   };
 
   const handleDeleteModule = async (moduleId) => {
@@ -144,9 +161,7 @@ function Tickets() {
     try {
       await api.delete(`support/modules/${moduleId}/`);
       fetchData();
-    } catch (error) {
-      alert("Ошибка при удалении модуля.");
-    }
+    } catch (error) { alert("Ошибка при удалении модуля."); }
   };
 
   const handleUpdateAssignees = async (moduleId, selectedOptions) => {
@@ -154,12 +169,9 @@ function Tickets() {
     try {
       await api.patch(`support/modules/${moduleId}/`, { assignees: assigneeIds });
       fetchData();
-    } catch (error) {
-      alert("Ошибка при обновлении исполнителей.");
-    }
+    } catch (error) { alert("Ошибка при обновлении исполнителей."); }
   };
 
-  // === ФИЛЬТРАЦИЯ СПИСКА ===
   const filteredTickets = useMemo(() => {
     return tickets.filter(t => {
       const matchMod = filterModule === 'all' || t.module === parseInt(filterModule);
@@ -174,7 +186,6 @@ function Tickets() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* ШАПКА */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-6 gap-4 border-b border-gray-200 pb-6">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 flex items-center gap-2">
@@ -193,7 +204,6 @@ function Tickets() {
         </div>
       </div>
 
-      {/* СОЗДАНИЕ ЗАЯВКИ */}
       {activeTab === 'create' && (
         <div className="max-w-4xl mx-auto w-full">
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-5 mb-6 shadow-sm">
@@ -233,12 +243,25 @@ function Tickets() {
                 <textarea value={desc} onChange={e => setDesc(e.target.value)} placeholder="Шаги для воспроизведения, что произошло..." className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] text-sm" required />
               </div>
 
+              {/* БЛОК МНОЖЕСТВЕННОЙ ЗАГРУЗКИ ФАЙЛОВ */}
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Скриншот ошибки</label>
-                <div onClick={() => fileInputRef.current?.click()} className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${screenshot ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
-                  {screenshot ? <span className="font-bold text-green-700">✅ Прикреплен: {screenshot.name}</span> : <span className="text-sm font-medium text-gray-500">📎 Нажмите, чтобы прикрепить картинку</span>}
-                  <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Скриншоты и файлы</label>
+                <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors border-gray-300 hover:border-blue-400 hover:bg-blue-50">
+                  <span className="text-sm font-medium text-gray-500">📎 Нажмите, чтобы прикрепить файлы (можно несколько)</span>
+                  <input type="file" multiple ref={fileInputRef} onChange={handleFileChange} className="hidden" />
                 </div>
+
+                {/* Отображение выбранных файлов перед отправкой */}
+                {attachments.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {attachments.map((file, idx) => (
+                      <div key={idx} className="bg-blue-50 text-blue-700 text-xs px-3 py-1.5 rounded-lg border border-blue-100 flex items-center gap-2">
+                        <span className="truncate max-w-[200px]">{file.name}</span>
+                        <button type="button" onClick={() => removeAttachment(idx)} className="text-blue-400 hover:text-red-500 font-bold ml-1">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -255,7 +278,6 @@ function Tickets() {
         </div>
       )}
 
-      {/* СПИСОК ЗАЯВОК */}
       {activeTab === 'list' && !selectedTicket && (
         <div className="flex-1 flex flex-col">
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -308,7 +330,7 @@ function Tickets() {
         </div>
       )}
 
-      {/* ДЕТАЛЬНЫЙ ПРОСМОТР */}
+      {/* ДЕТАЛЬНЫЙ ПРОСМОТР ТИКЕТА */}
       {activeTab === 'list' && selectedTicket && (
         <div className="max-w-4xl mx-auto w-full">
           <button onClick={() => setSelectedTicket(null)} className="text-sm font-bold text-blue-500 hover:text-blue-700 mb-4 inline-flex items-center gap-1">← К списку заявок</button>
@@ -345,12 +367,35 @@ function Tickets() {
                 <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed bg-white border border-gray-200 p-4 rounded-xl shadow-inner">{selectedTicket.description}</div>
               </div>
 
-              {selectedTicket.screenshot && (
+              {/* БЛОК ВЫВОДА ПРИКРЕПЛЕННЫХ ФАЙЛОВ */}
+              {selectedTicket.attachments && selectedTicket.attachments.length > 0 && (
                 <div className="mb-8">
-                  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2">Скриншот</span>
-                  <a href={selectedTicket.screenshot} target="_blank" rel="noopener noreferrer">
-                    <img src={selectedTicket.screenshot} alt="Скриншот" className="max-w-full rounded-xl border border-gray-200 shadow-sm cursor-pointer hover:opacity-90" />
-                  </a>
+                  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2">Прикрепленные файлы</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {selectedTicket.attachments.map(att => {
+                      const isImage = att.file.match(/\.(jpeg|jpg|gif|png)$/i);
+                      return (
+                        <div key={att.id} className="relative group border border-gray-200 rounded-xl overflow-hidden bg-gray-50 flex items-center p-3 shadow-sm hover:border-blue-300 transition-colors">
+                          <a href={att.file} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 w-full overflow-hidden">
+                            {isImage ? (
+                              <img src={att.file} alt="Вложение" className="w-10 h-10 object-cover rounded-md border border-gray-200 shrink-0" />
+                            ) : (
+                              <div className="w-10 h-10 bg-white border border-gray-200 rounded-md flex items-center justify-center text-xl shrink-0">📄</div>
+                            )}
+                            <span className="text-sm font-semibold text-gray-700 hover:text-blue-600 truncate">{att.file_name}</span>
+                          </a>
+                          {/* Кнопка удаления файла (доступна админам или автору тикета) */}
+                          {(isFullAccess || selectedTicket.author === currentUser?.id) && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteAttachment(att.id); }}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 bg-white border border-gray-200 w-7 h-7 flex items-center justify-center rounded-lg shadow-sm opacity-0 group-hover:opacity-100 hover:bg-red-50 transition-all font-bold"
+                              title="Удалить файл"
+                            >✕</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -367,7 +412,6 @@ function Tickets() {
         </div>
       )}
 
-      {/* АДМИНКА */}
       {activeTab === 'admin' && isFullAccess && (
         <div className="max-w-4xl mx-auto w-full">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">

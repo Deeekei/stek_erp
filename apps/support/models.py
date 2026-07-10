@@ -37,9 +37,6 @@ class Ticket(models.Model):
     anydesk = models.CharField(max_length=50, blank=True, verbose_name="AnyDesk")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', verbose_name="Статус")
 
-    # Скриншот (для работы потребуется настроить MEDIA_ROOT, если еще не настроен)
-    screenshot = models.ImageField(upload_to='support/screenshots/%Y/%m/', null=True, blank=True,
-                                   verbose_name="Скриншот ошибки")
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
@@ -51,3 +48,12 @@ class Ticket(models.Model):
 
     def __str__(self):
         return f"Заявка #{self.id} - {self.title}"
+
+class TicketAttachment(models.Model):
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='attachments', verbose_name="Заявка")
+    file = models.FileField(upload_to='support/attachments/%Y/%m/', verbose_name="Файл")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата загрузки")
+
+    class Meta:
+        verbose_name = "Вложение заявки"
+        verbose_name_plural = "Вложения заявок"
