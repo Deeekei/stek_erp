@@ -59,6 +59,33 @@ function Tickets() {
     }
   };
 
+  // === ВСТАВКА ИЗ БУФЕРА ОБМЕНА (Ctrl+V) ===
+  useEffect(() => {
+    const handlePaste = (e) => {
+      if (activeTab !== 'create') return; // Слушаем только на вкладке создания
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const pastedFiles = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const blob = items[i].getAsFile();
+          // Генерируем имя для скриншота, чтобы файлы не назывались одинаково
+          const file = new File([blob], `Скриншот_${new Date().toLocaleTimeString('ru-RU').replace(/:/g, '-')}.png`, { type: blob.type });
+          pastedFiles.push(file);
+        }
+      }
+
+      if (pastedFiles.length > 0) {
+        setAttachments(prev => [...prev, ...pastedFiles]);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [activeTab]);
+
   // === ОБРАБОТКА МНОЖЕСТВА ФАЙЛОВ ===
   const handleFileChange = (e) => {
     if (e.target.files.length > 0) {
@@ -243,12 +270,16 @@ function Tickets() {
                 <textarea value={desc} onChange={e => setDesc(e.target.value)} placeholder="Шаги для воспроизведения, что произошло..." className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] text-sm" required />
               </div>
 
-              {/* БЛОК МНОЖЕСТВЕННОЙ ЗАГРУЗКИ ФАЙЛОВ */}
+              {/* БЛОК ЗАГРУЗКИ ФАЙЛОВ (ПО ОДНОМУ) + Ctrl+V */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Скриншоты и файлы</label>
+
+                {/* ИНПУТ НАРУЖИ И БЕЗ multiple */}
+                <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+
+                {/* КЛИКАБЕЛЬНАЯ ЗОНА ТЕПЕРЬ ОТДЕЛЬНО */}
                 <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors border-gray-300 hover:border-blue-400 hover:bg-blue-50">
-                  <span className="text-sm font-medium text-gray-500">📎 Нажмите, чтобы прикрепить файлы (можно несколько)</span>
-                  <input type="file" multiple ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                  <span className="text-sm font-medium text-gray-500">📎 Нажмите, чтобы добавить файл (или нажмите <b>Ctrl+V</b> для вставки скриншота)</span>
                 </div>
 
                 {/* Отображение выбранных файлов перед отправкой */}
