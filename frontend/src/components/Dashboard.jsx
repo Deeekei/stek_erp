@@ -117,16 +117,17 @@ function Dashboard() {
   const fetchDashboardMetricsAndTasks = async (page, filter = activeTaskFilter) => {
     try {
       let tasksEndpoint = `tasks/overdue/?page=${page}`; // По умолчанию
-      if (filter === 'all') tasksEndpoint = `tasks/?page=${page}`;
-      if (filter === 'new') tasksEndpoint = `tasks/?status=new&page=${page}`;
-      if (filter === 'in_progress') tasksEndpoint = `tasks/?status=in_progress&page=${page}`;
-      if (filter === 'completed') tasksEndpoint = `tasks/?status=completed&page=${page}`;
+
+      // ДОБАВЛЕН ПАРАМЕТР assigned_to_me=true ВО ВСЕ ЗАПРОСЫ
+      if (filter === 'all') tasksEndpoint = `tasks/?assigned_to_me=true&page=${page}`;
+      if (filter === 'new') tasksEndpoint = `tasks/?assigned_to_me=true&status=new&page=${page}`;
+      if (filter === 'in_progress') tasksEndpoint = `tasks/?assigned_to_me=true&status=in_progress&page=${page}`;
+      if (filter === 'completed') tasksEndpoint = `tasks/?assigned_to_me=true&status=completed&page=${page}`;
 
       const [metricsRes, tasksRes] = await Promise.all([
         api.get('tasks/dashboard_metrics/'),
         api.get(tasksEndpoint)
       ]);
-      setMetrics(metricsRes.data);
 
       let fetchedTasks = (tasksRes.data.results || tasksRes.data);
       if (filter === 'overdue') {
