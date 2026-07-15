@@ -128,7 +128,7 @@ function Dashboard() {
         api.get('tasks/dashboard_metrics/'),
         api.get(tasksEndpoint)
       ]);
-
+        setMetrics(metricsRes.data);
       let fetchedTasks = (tasksRes.data.results || tasksRes.data);
       if (filter === 'overdue') {
         fetchedTasks = fetchedTasks.filter(t => t.status !== 'delayed');
