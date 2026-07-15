@@ -33,7 +33,7 @@ from rest_framework.exceptions import PermissionDenied
 User = get_user_model()
 
 
-def notify_user(user, title, message, link=None):
+def notify_user(user, title, message, link=None, send_email=True):
     """
     Создает уведомление в БД, отправляет Email и Web Push.
     """
@@ -48,7 +48,7 @@ def notify_user(user, title, message, link=None):
     )
 
     # 2. Отправляем письмо через Celery
-    if getattr(user, 'email', None):
+    if send_email and getattr(user, 'email', None):
         try:
             send_notification_email.delay(user.email, title, message)
         except Exception:
@@ -119,11 +119,9 @@ def calculate_finish_date(start_date_str, duration_str):
 
 class CanEditTaskPermission(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        # 1. Чтение задачи разрешено всем
         if request.method in permissions.SAFE_METHODS:
             return True
 
-        # 2. ИСКЛЮЧЕНИЯ ДЛЯ ВСЕХ: Комментарии и файлы разрешены ВООБЩЕ ЛЮБОМУ пользователю
         if view.action in ['add_comment', 'upload_files']:
             return True
 
@@ -136,43 +134,17 @@ class CanEditTaskPermission(permissions.BasePermission):
             (obj.project and obj.project.visibility == 'all' and getattr(request.user, 'role', '') == 'manager')
         )
         is_assignee = (obj.assignee == request.user)
+        # Добавляем проверку на исполнителя для прав редактирования:
+        is_executor = (getattr(obj, 'executor', None) == request.user)
         is_participant = obj.participants.filter(id=request.user.id).exists()
 
-        # 3. Скрытие задачи доступно только причастным
         if view.action == 'hide':
-            return is_boss or is_assignee or is_participant
+            return is_boss or is_assignee or is_executor or is_participant
 
-        # === НОВОЕ: Разрешаем Участникам отправлять PATCH/PUT (для смены личного статуса) ===
-        if request.method in ['PATCH', 'PUT'] and (is_boss or is_assignee or is_participant):
+        if request.method in ['PATCH', 'PUT'] and (is_boss or is_assignee or is_executor or is_participant):
             return True
 
-        # 4. Боссы и Исполнитель могут редактировать саму задачу полноценно
-        return is_boss or is_assignee
-
-        # === ПРОВЕРКА РОЛЕЙ ===
-        is_boss = (
-            getattr(request.user, 'role', '') in ['admin', 'director'] or
-            request.user.is_superuser or
-            (obj.project and obj.project.manager == request.user) or
-            (obj.project and obj.project.visibility == 'selected' and obj.project.allowed_users.filter(id=request.user.id).exists()) or
-            (obj.project and obj.project.visibility == 'all' and getattr(request.user, 'role', '') == 'manager')
-        )
-        is_assignee = (obj.assignee == request.user)
-        is_participant = obj.participants.filter(id=request.user.id).exists()
-
-        # 3. Скрытие задачи доступно только причастным (чтобы левый юзер не скрыл чужую задачу)
-        if view.action == 'hide':
-            if is_boss or is_assignee or is_participant:
-                return True
-            return False
-
-        # === ПРАВИЛА ДЛЯ РЕДАКТИРОВАНИЯ САМОЙ ЗАДАЧИ (Сроки, статусы, названия) ===
-        # 4. Боссы и Исполнитель могут редактировать саму задачу
-        if is_boss or is_assignee:
-            return True
-
-        # Всем остальным редактировать саму задачу запрещено
-        return False
+        return is_boss or is_assignee or is_executor
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -529,7 +501,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         # 3. Фильтрация "Мои задачи"
         assigned_to_me = self.request.query_params.get('assigned_to_me')
         if assigned_to_me == 'true':
-            queryset = queryset.filter(Q(assignee=user) | Q(participants=user)).distinct()
+            queryset = queryset.filter(Q(assignee=user) | Q(executor=user) | Q(participants=user)).distinct()
 
         # 4. НОВОЕ: Фильтрация по статусу (для дашборда)
         status = self.request.query_params.get('status')
@@ -776,7 +748,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         today = date.today()
 
         # Теперь мы ищем задачи, где пользователь - Исполнитель ИЛИ Участник
-        base_query = Q(assignee=user) | Q(participants=user)
+        base_query = Q(assignee=user) | Q(participants=user) | Q(executor=user)
 
         metrics = Task.objects.filter(base_query).distinct().aggregate(
             total=Count('id'),
@@ -836,17 +808,34 @@ class TaskViewSet(viewsets.ModelViewSet):
         if serializer.is_valid():
             serializer.save(task=task, author=request.user)
 
-            if task.assignee and task.assignee != request.user:
-                author_name = request.user.get_full_name() or request.user.username
-                # Добавляем ссылки для уведомления о комментарии
-                task_link = f"/task/{task.id}"
-                full_url = f"https://erp.stekufa.ru{task_link}"
+            author_name = request.user.get_full_name() or request.user.username
+            task_link = f"/task/{task.id}"
+            full_url = f"https://erp.stekufa.ru{task_link}"
 
+            # 1. Собираем уникальный список всех, кто причастен к задаче
+            users_to_notify = set()
+
+            if task.assignee:
+                users_to_notify.add(task.assignee)
+
+            if getattr(task, 'executor', None):
+                users_to_notify.add(task.executor)
+
+            for participant in task.participants.all():
+                users_to_notify.add(participant)
+
+            # 2. Исключаем из рассылки автора комментария
+            if request.user in users_to_notify:
+                users_to_notify.remove(request.user)
+
+            # 3. Отправляем уведомления всем собранным пользователям
+            for target_user in users_to_notify:
                 notify_user(
-                    user=task.assignee,
-                    title="Новый комментарий",
-                    message=f"В вашей задаче '{task.title}' появился новый комментарий от {author_name}.\nПерейти к задаче: {full_url}",
-                    link=task_link
+                    user=target_user,
+                    title="💬 Новый комментарий",
+                    message=f"{author_name} оставил(а) комментарий в задаче '{task.title}'.\nПерейти к задаче: {full_url}",
+                    link=task_link,
+                    send_email=False,
                 )
 
             return Response(serializer.data, status=status.HTTP_201_CREATED)

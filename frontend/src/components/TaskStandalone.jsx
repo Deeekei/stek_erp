@@ -14,15 +14,12 @@ function TaskStandalone() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Состояния для комментариев и файлов
   const [newComment, setNewComment] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
 
-  // Состояния режима редактирования
   const [isEditMode, setIsEditMode] = useState(false);
   const [editFormData, setEditFormData] = useState({});
 
-  // Состояния для модалки завершения просроченной задачи
   const [isCompletionModalOpen, setIsCompletionModalOpen] = useState(false);
   const [completionDelayReason, setCompletionDelayReason] = useState('');
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -41,7 +38,6 @@ function TaskStandalone() {
           setCurrentUser(currentUsr);
         }
 
-        // Загружаем задачу, а также пользователей и проекты для режима редактирования
         const [taskRes, usersRes, projectsRes] = await Promise.all([
           api.get(`tasks/${id}/`),
           api.get('users/').catch(() => ({ data: [] })),
@@ -60,7 +56,6 @@ function TaskStandalone() {
     fetchData();
   }, [id]);
 
-  // === ПРОВЕРКА ПРАВ ===
   const isRoleManager = currentUser?.role === 'manager';
   const isBoss = currentUser && task && (
     currentUser.role === 'admin' ||
@@ -72,14 +67,14 @@ function TaskStandalone() {
     (task.project_details?.visibility === 'all' && isRoleManager)
   );
 
-  const isAssignee = currentUser && task && currentUser.id === task.assignee;
+  const isAssignee = currentUser && task && currentUser.id === (task.assignee?.id ?? task.assignee);
+  const isExecutor = currentUser && task && currentUser.id === (task.executor?.id ?? task.executor);
   const isParticipant = currentUser && task && (task.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser.id);
 
   const canEditAll = isBoss;
-  const canEditStatus = isBoss || isAssignee || isParticipant;
+  const canEditStatus = isBoss || isAssignee || isExecutor || isParticipant;
   const canInteract = true;
 
-  // Опции для селектов и поиска имен
   const userOptions = useMemo(() => users.map(u => ({
     value: u.id,
     label: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || `Сотрудник №${u.id}`
@@ -90,21 +85,20 @@ function TaskStandalone() {
     label: p.title
   })), [projects]);
 
-  // === ОБРАБОТЧИКИ ДЕЙСТВИЙ (ПРОСМОТР И РЕДАКТИРОВАНИЕ) ===
-
   const handleOpenEdit = () => {
-    const assigneeId = task.assignee_details?.id || task.assignee;
     setEditFormData({
       title: task.title || '',
       description: task.description || '',
       status: task.status || 'new',
       plan_start_date: task.plan_start_date || '',
       plan_end_date: task.plan_end_date || '',
-      assignee: assigneeId || null,
+      assignee: task.assignee?.id ?? task.assignee ?? null,
+      executor: task.executor?.id ?? task.executor ?? null,
       participants: (task.participants || []).map(p => typeof p === 'object' ? p.id : p),
       priority: task.priority || 'medium',
       project: task.project || null,
-      is_milestone: task.is_milestone || false
+      is_milestone: task.is_milestone || false,
+      law_type: task.law_type || 'other'
     });
     setIsEditMode(true);
   };
@@ -121,7 +115,6 @@ function TaskStandalone() {
       setIsCompletionModalOpen(true);
       return;
     }
-
     await saveTaskChanges();
   };
 
@@ -134,23 +127,7 @@ function TaskStandalone() {
       }
 
       const res = await api.patch(`tasks/${id}/`, payload);
-      let updatedTask = res.data;
-
-      if (task.status !== editFormData.status) {
-        const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-        let autoText = '';
-        if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
-        if (editFormData.status === 'completed') autoText = delayReason ? `✅ ${fullName} завершил(а) задачу с просрочкой.\nПричина: ${delayReason}` : `✅ ${fullName} завершил(а) задачу`;
-        if (editFormData.status === 'delayed') autoText = `⏸️ ${fullName} перевел(а) задачу в отсрочку`;
-        if (editFormData.status === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
-
-        if (autoText) {
-          const commentRes = await api.post(`tasks/${id}/add_comment/`, { text: autoText });
-          updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
-        }
-      }
-
-      setTask(updatedTask);
+      setTask(res.data);
       setIsEditMode(false);
       setIsCompletionModalOpen(false);
       setCompletionDelayReason('');
@@ -179,26 +156,12 @@ function TaskStandalone() {
         payload.delay_reason = delayReason;
         payload.actual_end_date = today;
       }
-      if (isParticipant && !isAssignee && !isBoss) {
+      if (isParticipant && !isAssignee && !isExecutor && !isBoss) {
         payload.personal_only = true;
       }
 
       const res = await api.patch(`tasks/${id}/`, payload);
-      let updatedTask = res.data;
-
-      const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-      let autoText = '';
-      if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
-      if (newStatus === 'completed') autoText = delayReason ? `✅ ${fullName} завершил(а) задачу с просрочкой.\nПричина: ${delayReason}` : `✅ ${fullName} завершил(а) задачу`;
-      if (newStatus === 'delayed') autoText = `⏸️ ${fullName} перевел(а) задачу в отсрочку`;
-      if (newStatus === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
-
-      if (autoText) {
-        const commentRes = await api.post(`tasks/${id}/add_comment/`, { text: autoText });
-        updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
-      }
-
-      setTask(updatedTask);
+      setTask(res.data);
       setIsCompletionModalOpen(false);
       setCompletionDelayReason('');
       setPendingStatus(null);
@@ -210,12 +173,8 @@ function TaskStandalone() {
   const handleConfirmCompletion = (e) => {
     e.preventDefault();
     if (!completionDelayReason.trim()) return alert("Укажите причину просрочки!");
-
-    if (pendingStatus === 'completed_from_edit') {
-      saveTaskChanges(completionDelayReason);
-    } else {
-      executeQuickStatusChange(pendingStatus, completionDelayReason);
-    }
+    if (pendingStatus === 'completed_from_edit') saveTaskChanges(completionDelayReason);
+    else executeQuickStatusChange(pendingStatus, completionDelayReason);
   };
 
   const handleCommentSubmit = async (e) => {
@@ -262,11 +221,8 @@ function TaskStandalone() {
   return (
     <div className="max-w-6xl mx-auto mt-4 md:mt-8 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden flex flex-col md:flex-row min-h-[75vh] mb-12">
 
-      {/* === ЛЕВАЯ КОЛОНКА === */}
       <div className="w-full md:w-2/3 flex flex-col border-b md:border-b-0 md:border-r border-gray-100">
-
         {isEditMode ? (
-          /* --- РЕЖИМ РЕДАКТИРОВАНИЯ (ЛЕВАЯ ЧАСТЬ) --- */
           <div className="p-6 md:p-8 flex-1 overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">Редактирование задачи #{task.id}</span>
@@ -291,7 +247,6 @@ function TaskStandalone() {
             </form>
           </div>
         ) : (
-          /* --- РЕЖИМ ПРОСМОТРА (ЛЕВАЯ ЧАСТЬ) --- */
           <div className="p-6 md:p-8 flex flex-col h-full">
             <div className="mb-6 flex justify-between items-start">
               <div>
@@ -354,11 +309,9 @@ function TaskStandalone() {
         )}
       </div>
 
-      {/* === ПРАВАЯ КОЛОНКА === */}
       <div className="w-full md:w-1/3 bg-slate-50 p-6 md:p-8 flex flex-col border-l border-gray-100">
 
         {isEditMode ? (
-          /* --- РЕЖИМ РЕДАКТИРОВАНИЯ (ПРАВАЯ ЧАСТЬ) --- */
           <div className="flex-1 flex flex-col h-full">
             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Настройки задачи</h3>
             <div className="space-y-4 flex-1">
@@ -377,8 +330,11 @@ function TaskStandalone() {
                 <div><label className="block text-xs font-bold text-gray-500 mb-1">Старт *</label><input type="date" value={editFormData.plan_start_date || ''} onChange={e => setEditFormData({...editFormData, plan_start_date: e.target.value})} className="w-full border border-gray-300 px-3 py-2 rounded-lg outline-none text-sm font-medium" /></div>
                 <div><label className="block text-xs font-bold text-gray-500 mb-1">Дедлайн *</label><input type="date" value={editFormData.plan_end_date || ''} onChange={e => setEditFormData({...editFormData, plan_end_date: e.target.value})} className="w-full border border-gray-300 px-3 py-2 rounded-lg outline-none text-sm font-medium" /></div>
               </div>
-              <div><label className="block text-xs font-bold text-gray-500 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == editFormData.assignee) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Назначить..." /></div>
-              <div><label className="block text-xs font-bold text-gray-500 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => editFormData.participants.includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." /></div>
+
+              <div><label className="block text-xs font-bold text-gray-500 mb-1">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == editFormData.assignee) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Контролирует..." /></div>
+              {/* НОВОЕ ПОЛЕ ИСПОЛНИТЕЛЯ */}
+              <div><label className="block text-xs font-bold text-gray-500 mb-1">Исполнитель</label><Select options={userOptions} value={userOptions.find(o => o.value == editFormData.executor) || null} onChange={(opt) => setEditFormData({...editFormData, executor: opt ? opt.value : null})} placeholder="Выполняет работу..." /></div>
+              <div><label className="block text-xs font-bold text-gray-500 mb-1">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => editFormData.participants.includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Наблюдатели..." /></div>
             </div>
             <div className="mt-6 pt-6 border-t border-gray-200">
               <button type="submit" form="standaloneEditForm" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-md transition-all text-sm">
@@ -387,11 +343,10 @@ function TaskStandalone() {
             </div>
           </div>
         ) : (
-          /* --- РЕЖИМ ПРОСМОТРА (ПРАВАЯ ЧАСТЬ) --- */
           <>
-            <div className={`mb-6 p-4 rounded-xl border ${isParticipant && !isAssignee && !isBoss ? 'bg-purple-50 border-purple-200' : 'bg-white border-gray-200 shadow-sm'}`}>
+            <div className={`mb-6 p-4 rounded-xl border ${isParticipant && !isAssignee && !isExecutor && !isBoss ? 'bg-purple-50 border-purple-200' : 'bg-white border-gray-200 shadow-sm'}`}>
               <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                {isParticipant && !isAssignee && !isBoss ? 'Ваш личный статус' : 'Глобальный статус'}
+                {isParticipant && !isAssignee && !isExecutor && !isBoss ? 'Ваш личный статус' : 'Глобальный статус'}
               </h3>
               {canEditStatus ? (
                 <select value={task.status} onChange={handleStatusSelect} className={`w-full font-bold text-sm rounded-lg px-4 py-2.5 outline-none border transition appearance-none cursor-pointer ${task.status === 'completed' ? 'bg-green-100 text-green-800 border-green-200 focus:ring-green-500' : task.status === 'in_progress' ? 'bg-blue-100 text-blue-800 border-blue-200 focus:ring-blue-500' : task.status === 'delayed' ? 'bg-orange-100 text-orange-800 border-orange-200 focus:ring-orange-500' : 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-white focus:ring-gray-400'}`}>
@@ -406,7 +361,6 @@ function TaskStandalone() {
 
             <div className="space-y-5 mb-8 bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
 
-              {/* Ответственный (Умный поиск из userOptions) */}
               <div>
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ответственный</p>
                 <div className="flex items-center mt-1.5">
@@ -419,8 +373,20 @@ function TaskStandalone() {
                 </div>
               </div>
 
-              {/* Участники (Умный поиск из userOptions) */}
-              <div className="border-t border-gray-50 pt-4 mt-5">
+              {/* НОВЫЙ БЛОК: ИСПОЛНИТЕЛЬ */}
+              <div className="border-t border-gray-50 pt-4">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Исполнитель</p>
+                <div className="flex items-center mt-1.5">
+                  <div className="w-7 h-7 rounded-full bg-green-100 text-green-600 flex items-center justify-center font-bold text-xs mr-2">
+                    {userOptions.find(o => o.value == (task.executor?.id ?? task.executor))?.label?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                  <span className="font-semibold text-gray-800 text-sm">
+                    {userOptions.find(o => o.value == (task.executor?.id ?? task.executor))?.label || 'Не назначен'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-50 pt-4">
                 <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2">Участники</span>
                 {task.participants && task.participants.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
@@ -487,14 +453,22 @@ function TaskStandalone() {
         )}
       </div>
 
-      {/* === МОДАЛКА ПРОСРОЧКИ === */}
       {isCompletionModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsCompletionModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-8 w-full max-w-md border-t-8 border-red-500">
             <h3 className="text-xl font-bold text-gray-800 mb-4 break-words">Задача просрочена</h3>
             <form onSubmit={handleConfirmCompletion}>
-              <textarea value={completionDelayReason} onChange={(e) => setCompletionDelayReason(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words" placeholder="Укажите причину просрочки..." required />
-              <div className="flex justify-end gap-3"><button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button><button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button></div>
+              <textarea
+                value={completionDelayReason}
+                onChange={(e) => setCompletionDelayReason(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-red-500 min-h-[120px] mb-6 text-sm break-words"
+                placeholder="Укажите причину просрочки..."
+                required
+              />
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setIsCompletionModalOpen(false)} className="px-5 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">Отмена</button>
+                <button type="submit" className="px-5 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-lg">Завершить</button>
+              </div>
             </form>
           </div>
         </div>

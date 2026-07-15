@@ -13,7 +13,7 @@ class CustomUserAdmin(UserAdmin):
 
     add_fieldsets = UserAdmin.add_fieldsets + (
         ('Корпоративная информация', {
-            'fields': ('position', 'role', 'can_post_news'),
+            'fields': ('email','position', 'role', 'can_post_news'),
         }),
     )
 

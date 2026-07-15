@@ -33,7 +33,7 @@ function MyTasks() {
   const [isFullAccess, setIsFullAccess] = useState(false);
 
   // === СТЕЙТЫ ОТОБРАЖЕНИЯ И ФИЛЬТРОВ ===
-  const [viewMode, setViewMode] = useState('kanban');
+  const [viewMode, setViewMode] = useState('kanban'); // 'kanban', 'types', 'list' или 'calendar'
   const [searchQuery, setSearchQuery] = useState('');
   const [hideCompleted, setHideCompleted] = useState(false);
   const [showOnlyActual, setShowOnlyActual] = useState(false);
@@ -79,16 +79,14 @@ function MyTasks() {
         const isAOverdue = a.plan_end_date && a.plan_end_date < today && a.status !== 'completed' && a.status !== 'delayed';
         const isBOverdue = b.plan_end_date && b.plan_end_date < today && b.status !== 'completed' && b.status !== 'delayed';
 
-        // 1. ПРИОРИТЕТ: Просроченные выше
         if (isAOverdue && !isBOverdue) return -1;
         if (!isAOverdue && isBOverdue) return 1;
 
-        // 2. ВТОРОЙ УРОВЕНЬ: Если обе просрочены или обе нормальные, сортируем по дате
         const dateA = a.plan_start_date || a.plan_end_date;
         const dateB = b.plan_start_date || b.plan_end_date;
 
         if (!dateA && !dateB) return 0;
-        if (!dateA) return 1; // Задачи без дат уходят в самый конец
+        if (!dateA) return 1;
         if (!dateB) return -1;
 
         return new Date(dateA) - new Date(dateB);
@@ -128,12 +126,20 @@ function MyTasks() {
 
   const projectOptions = useMemo(() => projects.map(p => ({ value: p.id, label: p.title })), [projects]);
 
+  // Вспомогательная функция для отображения имен в таблице
+  const getUserName = (userField) => {
+    if (!userField) return '—';
+    const id = typeof userField === 'object' ? userField.id : userField;
+    return userOptions.find(o => o.value == id)?.label || `Сотрудник №${id}`;
+  };
+
   // === ФИЛЬТРАЦИЯ ЗАДАЧ ===
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const taskAssigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
+      const taskExecutorId = task.executor && typeof task.executor === 'object' ? task.executor.id : task.executor;
       const isParticipant = checkIsParticipant(task.participants, currentUser?.id);
-      const matchAssignee = taskAssigneeId == currentUser?.id || isParticipant;
+      const matchAssignee = taskAssigneeId == currentUser?.id || taskExecutorId == currentUser?.id || isParticipant;
 
       const matchCompleted = hideCompleted ? task.status !== 'completed' : true;
 
@@ -163,7 +169,6 @@ function MyTasks() {
         let aValue = a[sortConfig.key];
         let bValue = b[sortConfig.key];
 
-        // Умная сортировка для специфичных полей
         if (sortConfig.key === 'priority') {
           const weights = { low: 1, medium: 2, high: 3, critical: 4 };
           aValue = weights[a.priority] || 0;
@@ -172,15 +177,19 @@ function MyTasks() {
           aValue = (a.project_title || a.project || '').toString().toLowerCase();
           bValue = (b.project_title || b.project || '').toString().toLowerCase();
         } else if (sortConfig.key === 'status') {
-          const weights = { new: 1, in_progress: 2, delayed: 3, completed: 4 };
+          const weights = { new: 1, in_progress: 2, review: 3, delayed: 4, completed: 5, cancelled: 6 };
           aValue = weights[a.status] || 0;
           bValue = weights[b.status] || 0;
+        } else if (sortConfig.key === 'assignee' || sortConfig.key === 'executor') {
+          const idA = typeof a[sortConfig.key] === 'object' ? a[sortConfig.key]?.id : a[sortConfig.key];
+          const idB = typeof b[sortConfig.key] === 'object' ? b[sortConfig.key]?.id : b[sortConfig.key];
+          aValue = userOptions.find(o => o.value == idA)?.label?.toLowerCase() || '';
+          bValue = userOptions.find(o => o.value == idB)?.label?.toLowerCase() || '';
         } else if (typeof aValue === 'string') {
           aValue = aValue.toLowerCase();
           bValue = (bValue || '').toLowerCase();
         }
 
-        // Пустые значения (без дедлайна) всегда отправляем в конец списка
         if (aValue === bValue) return 0;
         if (!aValue) return 1;
         if (!bValue) return -1;
@@ -191,9 +200,8 @@ function MyTasks() {
       });
     }
     return sortableTasks;
-  }, [filteredTasks, sortConfig]);
+  }, [filteredTasks, sortConfig, userOptions]);
 
-  // Обработчик клика по заголовку колонки
   const requestSort = (key) => {
     let direction = 'asc';
     if (sortConfig.key === key && sortConfig.direction === 'asc') {
@@ -202,7 +210,6 @@ function MyTasks() {
     setSortConfig({ key, direction });
   };
 
-  // Визуальная иконка сортировки
   const getSortIcon = (columnName) => {
     if (sortConfig.key === columnName) {
       return sortConfig.direction === 'asc' ? '↑' : '↓';
@@ -231,62 +238,65 @@ function MyTasks() {
     });
   }, [filteredTasks, today]);
 
+  // === ОБРАБОТКА DRAG & DROP ===
   const handleDragEnd = async (result) => {
     if (!result.destination) return;
     const { source, destination, draggableId } = result;
     if (source.droppableId === destination.droppableId) return;
 
     const taskId = parseInt(draggableId);
-    const newStatus = destination.droppableId;
+    const destinationId = destination.droppableId;
     const task = tasks.find(t => t.id === taskId);
 
+    // ----------------------------------------------------
+    // А) ЛОГИКА ДЛЯ РЕЖИМА «ТИПЫ ЗАДАЧ» (Меняем law_type)
+    // ----------------------------------------------------
+    if (viewMode === 'types') {
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, law_type: destinationId } : t));
+      try {
+        await api.patch(`tasks/${taskId}/`, { law_type: destinationId });
+      } catch (error) { alert("Ошибка смены типа задачи"); fetchData(); }
+      return;
+    }
+
+    // ----------------------------------------------------
+    // Б) КЛАССИЧЕСКАЯ ЛОГИКА КАНБАНА (Меняем status)
+    // ----------------------------------------------------
     const isParticipant = (task.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
     if (isParticipant) {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: destinationId } : t));
       try {
-        await api.patch(`tasks/${taskId}/`, { status: newStatus, personal_only: true });
-      } catch (error) {
-        alert("Не удалось обновить личный статус");
-        fetchData();
-      }
+        await api.patch(`tasks/${taskId}/`, { status: destinationId, personal_only: true });
+      } catch (error) { alert("Не удалось обновить личный статус"); fetchData(); }
       return;
     }
 
     const taskProject = projects.find(p => p.id === task.project);
-    const isRoleManager = currentUser?.role === 'manager';
     const isBoss = isFullAccess ||
       taskProject?.owner === currentUser?.id ||
       taskProject?.manager === currentUser?.id ||
       (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) ||
-      (taskProject?.visibility === 'all' && isRoleManager);
+      (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
 
-    const isWorker = task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id;
+    const isWorker =
+      (task.assignee && typeof task.assignee === 'object' ? task.assignee.id == currentUser?.id : task.assignee == currentUser?.id) ||
+      (task.executor && typeof task.executor === 'object' ? task.executor.id == currentUser?.id : task.executor == currentUser?.id);
 
     if (!isBoss && !isWorker) return alert("Нет прав для действия.");
 
-    const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-
     const isOverdue = task.plan_end_date && task.plan_end_date < today;
-    if (newStatus === 'completed' && isOverdue) {
+    if (destinationId === 'completed' && isOverdue) {
       setTaskToComplete(task);
       setCompletionDelayReason(task.delay_reason || '');
       setIsCompletionModalOpen(true);
       return;
     }
 
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: destinationId } : t));
 
     try {
-      await api.patch(`tasks/${taskId}/`, { status: newStatus });
-      let autoText = '';
-      if (newStatus === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
-      if (newStatus === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
-
-      if (autoText) {
-          const commentRes = await api.post(`tasks/${taskId}/add_comment/`, { text: autoText });
-          setTasks(prev => prev.map(t => t.id === taskId ? { ...t, comments: [...(t.comments || []), commentRes.data] } : t));
-      }
+      await api.patch(`tasks/${taskId}/`, { status: destinationId });
     } catch (error) { alert("Ошибка смены статуса."); fetchData(); }
   };
 
@@ -314,11 +324,16 @@ function MyTasks() {
   const handleTaskClick = (task) => {
     setEditingTask(task);
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
+    const executorId = task.executor && typeof task.executor === 'object' ? task.executor.id : task.executor;
+
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
-      plan_end_date: task.plan_end_date || '', assignee: assigneeId || null, participants: task.participants || [], priority: task.priority || 'medium',
-      project: task.project || null,
-      is_milestone: task.is_milestone || false
+      plan_end_date: task.plan_end_date || '',
+      assignee: assigneeId || null,
+      executor: executorId || null,
+      participants: task.participants || [], priority: task.priority || 'medium',
+      project: task.project || null, is_milestone: task.is_milestone || false,
+      law_type: task.law_type || 'other'
     });
     setNewCommentText('');
     setIsEditMode(false);
@@ -329,12 +344,11 @@ function MyTasks() {
     e.preventDefault();
 
     const taskProject = projects.find(p => p.id === editingTask.project);
-    const isRoleManager = currentUser?.role === 'manager';
     const isBoss = isFullAccess ||
       taskProject?.owner === currentUser?.id ||
       taskProject?.manager === currentUser?.id ||
       (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) ||
-      (taskProject?.visibility === 'all' && isRoleManager);
+      (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
 
     if (isBoss) {
       if (!editFormData.plan_start_date || !editFormData.plan_end_date) return alert("Укажите даты.");
@@ -356,20 +370,6 @@ function MyTasks() {
     try {
       const response = await api.patch(`tasks/${editingTask.id}/`, payload);
       let updatedTask = response.data;
-
-      if (editingTask.status !== editFormData.status) {
-         const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
-         let autoText = '';
-         if (editFormData.status === 'in_progress') autoText = `⚙️ ${fullName} принял(а) задачу в работу`;
-         if (editFormData.status === 'completed') autoText = `✅ ${fullName} завершил(а) задачу`;
-         if (editFormData.status === 'delayed') autoText = `⏸️ ${fullName} перевел(а) задачу в отсрочку`;
-         if (editFormData.status === 'new') autoText = `🔄 ${fullName} вернул(а) задачу в "Новые"`;
-         if (autoText) {
-             const commentRes = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: autoText });
-             updatedTask.comments = [...(updatedTask.comments || []), commentRes.data];
-         }
-      }
-
       setTasks(prevTasks => prevTasks.map(t => t.id === editingTask.id ? updatedTask : t));
       setIsEditModalOpen(false); setEditingTask(null);
     } catch (error) { alert("Ошибка"); }
@@ -388,9 +388,7 @@ function MyTasks() {
       const response = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: newCommentText });
       const updatedTask = { ...editingTask, comments: [...(editingTask.comments || []), response.data] };
       setEditingTask(updatedTask); setTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t)); setNewCommentText('');
-    } catch (error) {
-      alert("Не удалось отправить комментарий.");
-    }
+    } catch (error) { alert("Не удалось отправить комментарий."); }
   };
 
   const handleFileUpload = async (e) => {
@@ -416,16 +414,24 @@ function MyTasks() {
 
   const taskProject = editingTask ? projects.find(p => p.id === editingTask.project) : null;
 
-  const isRoleManager = currentUser?.role === 'manager';
   const isBossAll = isFullAccess ||
     taskProject?.owner === currentUser?.id ||
     taskProject?.manager === currentUser?.id ||
     (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) ||
-    (taskProject?.visibility === 'all' && isRoleManager);
+    (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
 
-  const isWorkerTask = editingTask?.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask?.assignee == currentUser?.id;
+  const isWorkerTask =
+    (editingTask?.assignee && (editingTask.assignee.id == currentUser?.id || editingTask.assignee == currentUser?.id)) ||
+    (editingTask?.executor && (editingTask.executor.id == currentUser?.id || editingTask.executor == currentUser?.id));
+
   const isParticipantTask = checkIsParticipant(editingTask?.participants, currentUser?.id);
-
+  const isLegal = isFullAccess || (
+  Array.isArray(currentUser?.departments)
+    ? currentUser.departments.some(dep =>
+        dep === 'Юридический отдел' || dep?.name === 'Юридический отдел'
+      )
+    // На случай, если API всё еще отдает старое поле department как строку или ID
+    : currentUser?.department === 'Юридический отдел' || currentUser?.department?.name === 'Юридический отдел');
   const canEditAll = isBossAll;
   const canInteract = true;
 
@@ -445,6 +451,13 @@ function MyTasks() {
     { id: 'completed', title: 'Завершены', color: 'border-green-200 bg-green-50' }
   ];
 
+  const typeColumns = [
+    { id: 'other', title: 'Другое', color: 'border-gray-200 bg-gray-50' },
+    { id: 'shareholders', title: 'Дольщики', color: 'border-blue-200 bg-blue-50' },
+    { id: 'claims', title: 'Претензии', color: 'border-orange-200 bg-orange-50' },
+    { id: 'courts', title: 'Суды', color: 'border-red-200 bg-red-50' }
+  ];
+
   if (loading) return <div className="p-12 text-center text-gray-500">Загрузка ваших задач...</div>;
 
   return (
@@ -458,9 +471,12 @@ function MyTasks() {
 
         <div className="flex flex-col sm:flex-row flex-wrap items-center gap-3 w-full xl:w-auto shrink-0">
           <div className="flex bg-gray-100 p-1 rounded-xl shadow-inner border border-gray-200 w-full sm:w-auto">
-            <button onClick={() => setViewMode('kanban')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Канбан</button>
-            <button onClick={() => setViewMode('list')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Список</button>
-            <button onClick={() => setViewMode('calendar')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Календарь</button>
+            <button onClick={() => setViewMode('kanban')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'kanban' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Канбан</button>
+            {isLegal && (
+              <button onClick={() => setViewMode('types')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'types' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Типы задач</button>
+            )}
+            <button onClick={() => setViewMode('list')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Список</button>
+            <button onClick={() => setViewMode('calendar')} className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${viewMode === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Календарь</button>
           </div>
 
           <div className="w-full sm:w-64 relative flex-1 sm:flex-none">
@@ -474,7 +490,7 @@ function MyTasks() {
         </div>
       </div>
 
-      {/* 1. ВИД: КАНБАН ДОСКА */}
+      {/* 1. ВИД: СТАНДАРТНЫЙ КАНБАН */}
       {viewMode === 'kanban' && (
         <DragDropContext onDragEnd={handleDragEnd}>
           <div className="flex gap-6 overflow-x-auto pb-4 flex-1 items-start">
@@ -515,11 +531,52 @@ function MyTasks() {
         </DragDropContext>
       )}
 
-      {/* 2. ВИД: СПИСОК (ТАБЛИЦА С СОРТИРОВКОЙ) */}
+      {/* === 1.2 НОВЫЙ ВИД: КАНБАН ПО ЮРИДИЧЕСКИМ ТИПАМ === */}
+      {viewMode === 'types' && (
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <div className="flex gap-6 overflow-x-auto pb-4 flex-1 items-start">
+            {typeColumns.map(column => {
+              const columnTasks = filteredTasks.filter(task => task.law_type === column.id);
+              return (
+                <div key={column.id} className={`flex flex-col flex-shrink-0 w-80 rounded-xl border ${column.color} max-h-full`}>
+                  <div className="p-4 font-bold text-gray-700 flex justify-between items-center border-b border-black/5">
+                    {column.title} <span className="bg-white/60 px-2 py-0.5 rounded text-sm text-gray-500">{columnTasks.length}</span>
+                  </div>
+                  <Droppable droppableId={column.id}>
+                    {(provided) => (
+                      <div ref={provided.innerRef} {...provided.droppableProps} className="p-3 flex-1 overflow-y-auto min-h-[200px]">
+                        {columnTasks.map((task, index) => {
+                          const isOverdue = task.plan_end_date < today && task.status !== 'completed' && task.status !== 'delayed';
+                          const prioInfo = getPriorityInfo(task.priority);
+                          return (
+                            <Draggable key={task.id.toString()} draggableId={task.id.toString()} index={index}>
+                              {(provided) => (
+                                <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} onClick={() => handleTaskClick(task)} className={`bg-white p-4 mb-3 rounded-lg shadow-sm border ${isOverdue ? 'border-red-300 bg-red-50' : 'border-gray-100'} cursor-pointer hover:shadow-md transition-all`}>
+                                  <div className="flex justify-between items-start mb-2"><span className={`px-2 py-0.5 text-[10px] uppercase rounded font-medium ${prioInfo.color}`}>{prioInfo.icon} {prioInfo.label}</span><span className="text-gray-400 text-xs font-medium">#{task.id}</span></div>
+                                  <h4 className="font-semibold text-gray-800 text-sm mb-1 leading-snug break-words">{task.is_milestone && <span className="mr-1" title="Веха">🚩</span>}{task.title}</h4>
+                                  <div className="text-[11px] text-blue-600 font-medium mb-2 truncate"><Link to={`/projects/${task.project}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>📁 {task.project_title || `Проект #${task.project}`}</Link></div>
+                                  <div className="flex justify-between items-center text-xs text-gray-500 font-medium mt-3 border-t pt-2 border-gray-50"><div className={isOverdue ? 'text-red-500 font-bold' : ''}>⏳ {task.plan_end_date || 'Нет срока'}</div>{task.comments?.length > 0 && <div>💬 {task.comments.length}</div>}</div>
+                                </div>
+                              )}
+                            </Draggable>
+                          )
+                        })}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </div>
+              );
+            })}
+          </div>
+        </DragDropContext>
+      )}
+
+      {/* 2. ВИД: СПИСОК (ОБНОВЛЕННЫЙ С НОВЫМИ КОЛОНКАМИ И СКРЫТЫМ БЕЙДЖЕМ) */}
       {viewMode === 'list' && (
         <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
           <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse min-w-[800px]">
+            <table className="w-full text-left border-collapse min-w-[1000px]">
               <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 text-xs uppercase font-bold sticky top-0 z-10">
                 <tr>
                   <th className="px-5 py-4 w-16 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('id')}>
@@ -528,13 +585,23 @@ function MyTasks() {
                   <th className="px-5 py-4 w-32 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('priority')}>
                     <div className="flex items-center gap-1">Приоритет <span className="text-blue-500 text-[11px]">{getSortIcon('priority')}</span></div>
                   </th>
-                  <th className="px-5 py-4 min-w-[250px] cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('title')}>
+                  <th className="px-5 py-4 min-w-[200px] cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('title')}>
                     <div className="flex items-center gap-1">Название <span className="text-blue-500 text-[11px]">{getSortIcon('title')}</span></div>
                   </th>
-                  <th className="px-5 py-4 w-48 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('project')}>
+                  <th className="px-5 py-4 w-40 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('project')}>
                     <div className="flex items-center gap-1">Проект <span className="text-blue-500 text-[11px]">{getSortIcon('project')}</span></div>
                   </th>
-                  <th className="px-5 py-4 w-36 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('status')}>
+
+                  {/* === НОВЫЕ КОЛОНКИ: ОТВЕТСТВЕННЫЙ И ИСПОЛНИТЕЛЬ === */}
+                  <th className="px-5 py-4 w-36 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('assignee')}>
+                    <div className="flex items-center gap-1">Ответственный <span className="text-blue-500 text-[11px]">{getSortIcon('assignee')}</span></div>
+                  </th>
+                  <th className="px-5 py-4 w-36 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('executor')}>
+                    <div className="flex items-center gap-1">Исполнитель <span className="text-blue-500 text-[11px]">{getSortIcon('executor')}</span></div>
+                  </th>
+                  {/* ================================================== */}
+
+                  <th className="px-5 py-4 w-32 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('status')}>
                     <div className="flex items-center gap-1">Статус <span className="text-blue-500 text-[11px]">{getSortIcon('status')}</span></div>
                   </th>
                   <th className="px-5 py-4 w-32 cursor-pointer group hover:bg-gray-200 transition-colors select-none" onClick={() => requestSort('plan_end_date')}>
@@ -566,26 +633,33 @@ function MyTasks() {
                             {task.is_milestone && <span className="mr-2" title="Веха">🚩</span>}
                             {task.title}
                           </div>
-                          {task.comments?.length > 0 && (
-                            <div className="text-xs text-gray-400 mt-1 font-medium flex items-center gap-1">
-                              💬 {task.comments.length} комментариев
-                            </div>
+                          {/* Скрываем бейдж от тех, кто не юрист */}
+                          {isLegal && task.law_type && task.law_type !== 'other' && (
+                            <span className="inline-block text-[10px] bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded mt-1 font-semibold">
+                              {task.law_type === 'shareholders' ? '👥 Дольщики' : task.law_type === 'claims' ? '📄 Претензии' : '⚖️ Суды'}
+                            </span>
                           )}
                         </td>
                         <td className="px-5 py-4">
-                          <Link
-                            to={`/projects/${task.project}`}
-                            className="text-blue-600 font-medium text-xs hover:underline truncate block"
-                            onClick={(e) => e.stopPropagation()}
-                          >
+                          <Link to={`/projects/${task.project}`} className="text-blue-600 font-medium text-xs hover:underline truncate block max-w-[150px]" onClick={(e) => e.stopPropagation()}>
                             📁 {taskProjectTitle}
                           </Link>
                         </td>
+
+                        {/* === ЯЧЕЙКИ: ОТВЕТСТВЕННЫЙ И ИСПОЛНИТЕЛЬ === */}
+                        <td className="px-5 py-4 text-gray-700 font-medium text-[13px]">
+                          {getUserName(task.assignee)}
+                        </td>
+                        <td className="px-5 py-4 text-gray-700 font-medium text-[13px]">
+                          {getUserName(task.executor)}
+                        </td>
+                        {/* =========================================== */}
+
                         <td className="px-5 py-4">
-                          {task.status === 'new' && <span className="text-gray-600 font-bold text-[11px] uppercase tracking-wider bg-gray-100 px-2.5 py-1 rounded-md">Новая</span>}
-                          {task.status === 'in_progress' && <span className="text-blue-600 font-bold text-[11px] uppercase tracking-wider bg-blue-100 px-2.5 py-1 rounded-md">В работе</span>}
-                          {task.status === 'delayed' && <span className="text-orange-600 font-bold text-[11px] uppercase tracking-wider bg-orange-100 px-2.5 py-1 rounded-md">В отсрочке</span>}
-                          {task.status === 'completed' && <span className="text-green-600 font-bold text-[11px] uppercase tracking-wider bg-green-100 px-2.5 py-1 rounded-md">Завершена</span>}
+                          {task.status === 'new' && <span className="text-gray-600 font-bold text-[11px] uppercase tracking-wider bg-gray-100 px-2.5 py-1 rounded-md whitespace-nowrap">Новая</span>}
+                          {task.status === 'in_progress' && <span className="text-blue-600 font-bold text-[11px] uppercase tracking-wider bg-blue-100 px-2.5 py-1 rounded-md whitespace-nowrap">В работе</span>}
+                          {task.status === 'delayed' && <span className="text-orange-600 font-bold text-[11px] uppercase tracking-wider bg-orange-100 px-2.5 py-1 rounded-md whitespace-nowrap">В отсрочке</span>}
+                          {task.status === 'completed' && <span className="text-green-600 font-bold text-[11px] uppercase tracking-wider bg-green-100 px-2.5 py-1 rounded-md whitespace-nowrap">Завершена</span>}
                         </td>
                         <td className={`px-5 py-4 font-medium whitespace-nowrap ${isOverdue ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
                           {isOverdue && <span className="mr-1">⏳</span>}
@@ -596,9 +670,8 @@ function MyTasks() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan="6" className="px-5 py-12 text-center text-gray-400 font-medium text-base">
-                      <span className="text-4xl block mb-2">📭</span>
-                      Подходящих задач не найдено
+                    <td colSpan="8" className="px-5 py-12 text-center text-gray-400 font-medium text-base">
+                      <span className="text-4xl block mb-2">📭</span> Подходящих задач не найдено
                     </td>
                   </tr>
                 )}
@@ -633,7 +706,7 @@ function MyTasks() {
         </div>
       )}
 
-      {/* === МОДАЛКА ЗАДАЧИ === */}
+      {/* === МОДАЛКА ПРОСМОТРА И РЕДАКТИРОВАНИЯ ЗАДАЧИ === */}
       {isEditModalOpen && editingTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 lg:p-8" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsEditModalOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] h-[90vh] flex flex-col overflow-hidden">
@@ -659,9 +732,29 @@ function MyTasks() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Проект</label><Select options={projectOptions} value={projectOptions.find(o => o.value == editFormData.project) || null} onChange={(opt) => setEditFormData({...editFormData, project: opt ? opt.value : null})} placeholder="Выбрать проект..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Ответственный</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.assignee?.id ?? editFormData.assignee)) || null} onChange={(opt) => setEditFormData({...editFormData, assignee: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label><select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="new">Новая</option><option value="in_progress">В работе</option><option value="delayed">⏸️ В отсрочке</option><option value="completed">Завершена</option></select></div>
-                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label><select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
+                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Исполнитель</label><Select options={userOptions} value={userOptions.find(o => o.value == (editFormData.executor?.id ?? editFormData.executor)) || null} onChange={(opt) => setEditFormData({...editFormData, executor: opt ? opt.value : null})} placeholder="Выбрать..." isSearchable menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+                          <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Участники</label><Select isMulti options={userOptions} value={userOptions.filter(o => (editFormData.participants || []).includes(o.value))} onChange={(selected) => setEditFormData({...editFormData, participants: selected ? selected.map(s => s.value) : []})} placeholder="Добавить..." menuPosition="fixed" styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }} /></div>
+
+                          <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Статус</label>
+                            <select value={editFormData.status} onChange={(e) => setEditFormData({...editFormData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
+                              <option value="new">Новая</option>
+                              <option value="in_progress">В работе</option>
+                              <option value="delayed">⏸️ В отсрочке</option>
+                              <option value="completed">Завершена</option>
+                            </select>
+                          </div>
+                          {/* Скрываем выбор типа от тех, кто не юрист */}
+                          {isLegal && (
+                            <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Тип правового отдела</label>
+                              <select value={editFormData.law_type} onChange={(e) => setEditFormData({...editFormData, law_type: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white">
+                                <option value="other">⚪ Другое</option>
+                                <option value="shareholders">👥 Дольщики</option>
+                                <option value="claims">📄 Претензии</option>
+                                <option value="courts">⚖️ Суды</option>
+                              </select>
+                            </div>
+                          )}
+                          <div className="sm:col-span-2"><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Критичность</label><select value={editFormData.priority} onChange={(e) => setEditFormData({...editFormData, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg bg-white"><option value="low">🟢 Низкая</option><option value="medium">🔵 Средняя</option><option value="high">🟣 Высокая</option><option value="critical">🔴 Критичная</option></select></div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Начало *</label><input type="date" value={editFormData.plan_start_date || ''} onChange={e => setEditFormData({...editFormData, plan_start_date: e.target.value})} className="w-full border p-2 rounded" /></div>
@@ -709,34 +802,31 @@ function MyTasks() {
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 min-h-0">
                     <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200"><h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4></div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                      {editingTask.comments && editingTask.comments.length > 0 ? (
-                        editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name && (
-                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
-                            (currentUser.username && c.author_name.includes(currentUser.username))
-                          );
-                          return (
-                            <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                              <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                                {/* --- ШАПКА СООБЩЕНИЯ С ИМЕНЕМ И ДАТОЙ --- */}
-                                <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
-                                  {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
-                                  {c.created_at && (
-                                    <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
-                                      {new Date(c.created_at).toLocaleString('ru-RU', {
-                                        day: '2-digit', month: '2-digit', year: '2-digit',
-                                        hour: '2-digit', minute: '2-digit'
-                                      })}
-                                    </span>
-                                  )}
-                                </div>
-                                {/* -------------------------------------- */}
-                                <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                      {editingTask.comments?.map(c => {
+                        const isMe = currentUser && c.author_name && (
+                          (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                          (currentUser.username && c.author_name.includes(currentUser.username))
+                        );
+                        return (
+                          <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                            <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
+                              <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
+                                {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
+                                {c.created_at && (
+                                  <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
+                                    {new Date(c.created_at).toLocaleString('ru-RU', {
+                                      day: '2-digit', month: '2-digit', year: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                )}
                               </div>
+                              <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                             </div>
-                          );
-                        })
-                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
+                          </div>
+                        );
+                      })}
+                      {(!editingTask.comments || editingTask.comments.length === 0) && <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
                     </div>
                     {canInteract && (
                       <div className="p-4 bg-white border-t border-gray-200 flex-shrink-0">
@@ -756,7 +846,7 @@ function MyTasks() {
                     <div className="p-6 md:px-8 pb-4 flex-shrink-0 border-b border-gray-200 bg-white">
                       <div className="flex items-center gap-2 mb-4">
                         <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
-                        <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wide ${isWorkerTask ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{isWorkerTask ? '👷‍♂️ Исполнитель' : '👀 Участник'}</span>
+                        <span className={`text-xs font-bold px-2 py-1 rounded uppercase tracking-wide ${isWorkerTask ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{isWorkerTask ? '👷‍♂️ Исполнитель/Ответственный' : '👀 Участник'}</span>
                         {canEditAll && (
                           <button onClick={() => setIsEditMode(true)} className="ml-auto text-xs bg-white hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-bold transition-colors border border-gray-200 shadow-sm flex items-center gap-1.5">
                             <span>✏️</span> Редактировать
@@ -767,34 +857,31 @@ function MyTasks() {
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
-                      {editingTask.comments && editingTask.comments.length > 0 ? (
-                        editingTask.comments.map(c => {
-                          const isMe = currentUser && c.author_name && (
-                            (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
-                            (currentUser.username && c.author_name.includes(currentUser.username))
-                          );
-                          return (
-                            <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                              <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
-                                {/* --- ШАПКА СООБЩЕНИЯ С ИМЕНЕМ И ДАТОЙ --- */}
-                                <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
-                                  {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
-                                  {c.created_at && (
-                                    <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
-                                      {new Date(c.created_at).toLocaleString('ru-RU', {
-                                        day: '2-digit', month: '2-digit', year: '2-digit',
-                                        hour: '2-digit', minute: '2-digit'
-                                      })}
-                                    </span>
-                                  )}
-                                </div>
-                                {/* -------------------------------------- */}
-                                <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
+                      {editingTask.comments?.map(c => {
+                        const isMe = currentUser && c.author_name && (
+                          (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
+                          (currentUser.username && c.author_name.includes(currentUser.username))
+                        );
+                        return (
+                          <div key={c.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                            <div className={`max-w-[90%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
+                              <div className={`flex items-end gap-4 mb-1.5 ${isMe ? 'justify-end' : 'justify-between'}`}>
+                                {!isMe && <span className="font-bold text-xs text-blue-600">{c.author_name}</span>}
+                                {c.created_at && (
+                                  <span className={`text-[10px] font-medium whitespace-nowrap ${isMe ? 'text-blue-200' : 'text-gray-400'}`}>
+                                    {new Date(c.created_at).toLocaleString('ru-RU', {
+                                      day: '2-digit', month: '2-digit', year: '2-digit',
+                                      hour: '2-digit', minute: '2-digit'
+                                    })}
+                                  </span>
+                                )}
                               </div>
+                              <p className="whitespace-pre-wrap break-words leading-relaxed">{c.text}</p>
                             </div>
-                          );
-                        })
-                      ) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
+                          </div>
+                        );
+                      })}
+                      {(!editingTask.comments || editingTask.comments.length === 0) && <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-70"><span className="text-5xl mb-3">📭</span><p className="text-sm font-medium text-center">Тишина</p></div>}
                     </div>
 
                     {canInteract && (
@@ -822,7 +909,11 @@ function MyTasks() {
                           </select>
                         </form>
                       ) : (
-                        <div className="text-sm font-semibold text-gray-800">{editingTask.status === 'new' ? '🆕 Новая' : editingTask.status === 'in_progress' ? '⚙️ В работе' : editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}</div>
+                        <div className="text-sm font-semibold text-gray-800">
+                          {editingTask.status === 'new' ? '🆕 Новая' :
+                           editingTask.status === 'in_progress' ? '⚙️ В работе' :
+                           editingTask.status === 'delayed' ? '⏸️ В отсрочке' : '✅ Завершена'}
+                        </div>
                       )}
                     </div>
 
@@ -830,6 +921,11 @@ function MyTasks() {
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Ответственный</span>
                         <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.assignee?.id ?? editingTask.assignee))?.label || 'Не назначен'}</span>
+                      </div>
+
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Исполнитель</span>
+                        <span className="text-sm font-semibold text-gray-800">{userOptions.find(o => o.value == (editingTask.executor?.id ?? editingTask.executor))?.label || 'Не назначен'}</span>
                       </div>
 
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
@@ -854,6 +950,19 @@ function MyTasks() {
                           <span className="text-sm font-semibold text-gray-400 italic">Нет участников</span>
                         )}
                       </div>
+
+                      {/* Скрываем фиолетовый блок от тех, кто не юрист */}
+                      {isLegal && (
+                        <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
+                          <span className="block text-[10px] text-purple-500 font-bold uppercase tracking-wider mb-1">Тип правового отдела</span>
+                          <span className="text-sm font-semibold text-purple-900">
+                            {editingTask.law_type === 'shareholders' && '👥 Дольщики'}
+                            {editingTask.law_type === 'claims' && '📄 Претензии'}
+                            {editingTask.law_type === 'courts' && '⚖️ Суды'}
+                            {(editingTask.law_type === 'other' || !editingTask.law_type) && '⚪ Другое'}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span><span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span></div>

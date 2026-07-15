@@ -65,6 +65,12 @@ class Task(models.Model):
         ('completed', 'Завершена'),
         ('cancelled', 'Отменена'),
     )
+    LAW_TYPE_CHOICES = (
+        ('other', 'Другое'),
+        ('shareholders','Дольщики'),
+        ('courts', 'Суды'),
+        ('claims', 'Претензии'),
+    )
     PRIORITY_CHOICES = (
         ('low', 'Низкий'),
         ('medium', 'Средний'),
@@ -73,6 +79,8 @@ class Task(models.Model):
     )
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='tasks', verbose_name="Проект")
     title = models.CharField(max_length=255, verbose_name="Заголовок")
+    law_type = models.CharField(max_length=20, choices=LAW_TYPE_CHOICES, default='other', verbose_name='Типы для правового отдела')
+    executor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='executed_tasks', verbose_name='Исполнитель')
     description = models.TextField(blank=True, verbose_name="Описание")
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tasks', verbose_name="Ответсвенный")
     participants = models.ManyToManyField(User, related_name='involved_tasks', blank=True, verbose_name='Участники')
