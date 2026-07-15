@@ -43,7 +43,7 @@ function Dashboard() {
   const [newTaskPlanStart, setNewTaskPlanStart] = useState('');
   const [newTaskPlanEnd, setNewTaskPlanEnd] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(null);
-  const [newTaskExecutor, setNewTaskExecutor] = useState(null); // <-- Добавлен исполнитель
+  const [newTaskExecutor, setNewTaskExecutor] = useState(null);
   const [newTaskParticipants, setNewTaskParticipants] = useState([]);
   const [newTaskProject, setNewTaskProject] = useState(null);
   const [newTaskFiles, setNewTaskFiles] = useState([]);
@@ -65,9 +65,14 @@ function Dashboard() {
   useEffect(() => {
     const initFast = async () => {
       setLoading(true);
-      await Promise.all([fetchDashboardMetricsAndTasks(1, 'overdue'), fetchNews(1)]);
-      setLoading(false);
-      fetchProjectsAndUsers();
+      try {
+        await Promise.all([fetchDashboardMetricsAndTasks(1, 'overdue'), fetchNews(1)]);
+      } catch (error) {
+        console.error("Ошибка при инициализации дашборда:", error);
+      } finally {
+        setLoading(false);
+        fetchProjectsAndUsers();
+      }
     };
     initFast();
   }, []);
@@ -133,6 +138,19 @@ function Dashboard() {
       setCurrentTaskPage(page);
     } catch (error) {
       if (error.response?.status === 404 && page > 1) fetchDashboardMetricsAndTasks(page - 1, filter);
+    }
+  };
+
+  // === ВОССТАНОВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ НОВОСТЕЙ ===
+  const fetchNews = async (page) => {
+    try {
+      const res = await api.get(`news/?page=${page}`);
+      setNews(res.data.results || res.data);
+      setTotalNewsPages(Math.ceil((res.data.count || 0) / 3) || 1);
+      setCurrentNewsPage(page);
+    } catch (error) {
+      console.error("Ошибка при загрузке новостей:", error);
+      if (error.response?.status === 404 && page > 1) fetchNews(page - 1);
     }
   };
 
@@ -218,7 +236,7 @@ function Dashboard() {
       title: newTaskTitle, description: newTaskDescription, status: newTaskStatus, priority: newTaskPriority,
       project: parseInt(newTaskProject), plan_end_date: newTaskPlanEnd,
       assignee: newTaskAssignee,
-      executor: newTaskExecutor, // <-- Отправляем Исполнителя
+      executor: newTaskExecutor,
       participants: newTaskParticipants,
       is_milestone: newTaskIsMilestone
     };
@@ -249,7 +267,7 @@ function Dashboard() {
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
       plan_end_date: task.plan_end_date || '',
       assignee: assigneeId || null,
-      executor: executorId || null, // <-- Исполнитель в стейте формы
+      executor: executorId || null,
       priority: task.priority || 'medium', participants: task.participants || [],
       project: task.project || null,
       is_milestone: task.is_milestone || false,
@@ -270,7 +288,6 @@ function Dashboard() {
 
     const isParticipant = (editingTask.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
-    // Обновленная логика определения прав исполнителя
     const isWorker =
       (editingTask.assignee && (typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask.assignee == currentUser?.id)) ||
       (editingTask.executor && (typeof editingTask.executor === 'object' ? editingTask.executor.id == currentUser?.id : editingTask.executor == currentUser?.id));
@@ -289,7 +306,6 @@ function Dashboard() {
       const response = await api.patch(`tasks/${editingTask.id}/`, payload);
       let updatedTask = response.data;
 
-      // Авто-комментарии (зависят от статуса)
       if (editingTask.status !== editFormData.status) {
          const fullName = `${currentUser?.last_name || ''} ${currentUser?.first_name || ''}`.trim() || currentUser?.username || 'Сотрудник';
          let autoText = '';
@@ -314,7 +330,6 @@ function Dashboard() {
 
     const isParticipant = (taskToComplete.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
-    // Обновленная логика для исполнителя
     const isWorker =
       (taskToComplete.assignee && (typeof taskToComplete.assignee === 'object' ? taskToComplete.assignee.id == currentUser?.id : taskToComplete.assignee == currentUser?.id)) ||
       (taskToComplete.executor && (typeof taskToComplete.executor === 'object' ? taskToComplete.executor.id == currentUser?.id : taskToComplete.executor == currentUser?.id));
@@ -392,7 +407,7 @@ function Dashboard() {
 
   const isParticipantTask = (editingTask?.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
 
-  // Определяем, является ли юзер юристом (для скрытия поля law_type, если оно вам нужно в Дашборде)
+  // Определяем, является ли юзер юристом
   const isLegal = isFullAccess || (
     Array.isArray(currentUser?.departments)
       ? currentUser.departments.some(dep => dep === 'Юридический отдел' || dep?.name === 'Юридический отдел')
