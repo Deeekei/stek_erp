@@ -514,24 +514,71 @@ class TaskViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
+        # 1. Оптимизация запросов к БД
         queryset = Task.objects.select_related(
             'project', 'assignee', 'parent_task'
         ).prefetch_related(
             'comments', 'attachments', 'dependencies', 'participants', 'hidden_for'
         )
 
+        # 2. Фильтрация по проекту
         project_id = self.request.query_params.get('project')
         if project_id:
             queryset = queryset.filter(project_id=project_id)
 
+        # 3. Фильтрация "Мои задачи"
         assigned_to_me = self.request.query_params.get('assigned_to_me')
         if assigned_to_me == 'true':
             queryset = queryset.filter(Q(assignee=user) | Q(participants=user)).distinct()
 
+        # 4. НОВОЕ: Фильтрация по статусу (для дашборда)
+        status = self.request.query_params.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+
+        # 5. Исключение скрытых задач
         if user.is_authenticated:
             queryset = queryset.exclude(hidden_for=user)
 
         return queryset.order_by('-created_at')
+
+    @action(detail=False, methods=['get'])
+    def overdue(self, request):
+        user = request.user
+        today = date.today()
+
+        # 1. Берем ту же оптимизацию, что и в get_queryset
+        queryset = Task.objects.select_related(
+            'project', 'assignee', 'parent_task'
+        ).prefetch_related(
+            'comments', 'attachments', 'dependencies', 'participants', 'hidden_for'
+        )
+
+        # 2. Оставляем только задачи, где юзер - исполнитель или участник
+        queryset = queryset.filter(Q(assignee=user) | Q(participants=user))
+
+        # 3. Фильтруем просроченные: дедлайн в прошлом, статус не завершен и не отложен
+        queryset = queryset.filter(
+            plan_end_date__lt=today
+        ).exclude(
+            status__in=['completed', 'delayed']
+        )
+
+        # 4. Исключаем скрытые задачи
+        if user.is_authenticated:
+            queryset = queryset.exclude(hidden_for=user)
+
+        # 5. Сортируем так, чтобы самые "горящие" (старые дедлайны) были сверху
+        queryset = queryset.distinct().order_by('plan_end_date')
+
+        # 6. Применяем стандартную пагинацию DRF
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         """ Триггер 1: Создание новой задачи """

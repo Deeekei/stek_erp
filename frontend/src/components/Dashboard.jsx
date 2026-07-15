@@ -14,9 +14,12 @@ function Dashboard() {
   const [reportProjectId, setReportProjectId] = useState(null);
 
   const [metrics, setMetrics] = useState({ total: 0, new_tasks: 0, in_progress: 0, completed: 0, overdue_count: 0 });
-  const [overdueTasks, setOverdueTasks] = useState([]);
-  const [currentOverduePage, setCurrentOverduePage] = useState(1);
-  const [totalOverduePages, setTotalOverduePages] = useState(1);
+
+  // === НОВЫЕ СТЕЙТЫ ДЛЯ ДИНАМИЧЕСКОГО СПИСКА ЗАДАЧ ===
+  const [activeTaskFilter, setActiveTaskFilter] = useState('overdue'); // По умолчанию показываем просроченные
+  const [dashboardTasks, setDashboardTasks] = useState([]);
+  const [currentTaskPage, setCurrentTaskPage] = useState(1);
+  const [totalTaskPages, setTotalTaskPages] = useState(1);
 
   const [news, setNews] = useState([]);
   const [currentNewsPage, setCurrentNewsPage] = useState(1);
@@ -61,7 +64,7 @@ function Dashboard() {
   useEffect(() => {
     const initFast = async () => {
       setLoading(true);
-      await Promise.all([fetchDashboardMetricsAndTasks(1), fetchNews(1)]);
+      await Promise.all([fetchDashboardMetricsAndTasks(1, 'overdue'), fetchNews(1)]);
       setLoading(false);
       fetchProjectsAndUsers();
     };
@@ -104,33 +107,52 @@ function Dashboard() {
     } catch (error) { console.error("Ошибка фоновой загрузки:", error); }
   };
 
-  const fetchDashboardMetricsAndTasks = async (page) => {
+  // === ОБНОВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ С УЧЕТОМ ФИЛЬТРА ===
+  const fetchDashboardMetricsAndTasks = async (page, filter = activeTaskFilter) => {
     try {
-      const [metricsRes, overdueRes] = await Promise.all([
+      let tasksEndpoint = `tasks/overdue/?page=${page}`; // По умолчанию
+      if (filter === 'all') tasksEndpoint = `tasks/?page=${page}`;
+      if (filter === 'new') tasksEndpoint = `tasks/?status=new&page=${page}`;
+      if (filter === 'in_progress') tasksEndpoint = `tasks/?status=in_progress&page=${page}`;
+      if (filter === 'completed') tasksEndpoint = `tasks/?status=completed&page=${page}`;
+
+      const [metricsRes, tasksRes] = await Promise.all([
         api.get('tasks/dashboard_metrics/'),
-        api.get(`tasks/overdue/?page=${page}`)
+        api.get(tasksEndpoint)
       ]);
       setMetrics(metricsRes.data);
-      // Если бэкенд отдает задачи 'delayed' как overdue, дополнительно страхуем тут
-      const filteredOverdue = (overdueRes.data.results || overdueRes.data).filter(t => t.status !== 'delayed');
-      setOverdueTasks(filteredOverdue);
-      setTotalOverduePages(Math.ceil((overdueRes.data.count || 0) / 10) || 1);
-      setCurrentOverduePage(page);
+
+      let fetchedTasks = (tasksRes.data.results || tasksRes.data);
+      if (filter === 'overdue') {
+        fetchedTasks = fetchedTasks.filter(t => t.status !== 'delayed');
+      }
+
+      setDashboardTasks(fetchedTasks);
+      setTotalTaskPages(Math.ceil((tasksRes.data.count || 0) / 10) || 1);
+      setCurrentTaskPage(page);
     } catch (error) {
-      if (error.response?.status === 404 && page > 1) fetchDashboardMetricsAndTasks(page - 1);
+      if (error.response?.status === 404 && page > 1) fetchDashboardMetricsAndTasks(page - 1, filter);
     }
   };
 
-  const fetchNews = async (page) => {
-    try {
-      const res = await api.get(`news/?page=${page}`);
-      setNews(res.data.results || res.data);
-      setTotalNewsPages(Math.ceil((res.data.count || 0) / 3) || 1);
-      setCurrentNewsPage(page);
-    } catch (error) {
-      if (error.response?.status === 404 && page > 1) fetchNews(page - 1);
+  // === ОБРАБОТЧИК КЛИКА ПО ВИДЖЕТУ ДАШБОРДА ===
+  const handleFilterClick = (filter) => {
+    setActiveTaskFilter(filter);
+    setCurrentTaskPage(1);
+    fetchDashboardMetricsAndTasks(1, filter);
+  };
+
+  // === ДИНАМИЧЕСКИЙ ЗАГОЛОВОК И ТЕКСТ СПИСКА ЗАДАЧ ===
+  const getListConfig = () => {
+    switch(activeTaskFilter) {
+      case 'all': return { title: '📋 Все задачи', empty: 'Нет задач', color: 'text-gray-700' };
+      case 'new': return { title: '🆕 Новые задачи', empty: 'Новых задач нет', color: 'text-gray-700' };
+      case 'in_progress': return { title: '⚙️ В работе', empty: 'Нет задач в работе', color: 'text-blue-600' };
+      case 'completed': return { title: '✅ Завершённые', empty: 'Завершённых задач нет', color: 'text-green-600' };
+      case 'overdue': default: return { title: '🚨 Просроченные', empty: 'Просроченные задачи отсутствуют 🎉', color: 'text-red-500' };
     }
   };
+  const listConfig = getListConfig();
 
   const handleDownloadEmployeeReport = async () => {
     if (!reportUserId) return alert("Пожалуйста, выберите сотрудника!");
@@ -235,7 +257,6 @@ function Dashboard() {
       setTaskToComplete(editingTask); setCompletionDelayReason(editingTask.delay_reason || ''); setIsCompletionModalOpen(true); setIsEditModalOpen(false); return;
     }
 
-    // === ЛОГИКА ДЛЯ УЧАСТНИКОВ ===
     const isParticipant = (editingTask.participants || []).some(p => (typeof p === 'object' ? p.id : p) == currentUser?.id);
     const isWorker = editingTask.assignee && typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask.assignee == currentUser?.id;
     const taskProject = projects.find(p => p.id === editingTask.project);
@@ -244,7 +265,6 @@ function Dashboard() {
     const payload = { ...editFormData };
     if (!payload.plan_start_date) payload.plan_start_date = null;
 
-    // Отправляем флаг, если участник меняет статус
     if (isParticipant && !isWorker && !isBoss) {
       payload.personal_only = true;
     }
@@ -266,7 +286,7 @@ function Dashboard() {
          }
       }
 
-      fetchDashboardMetricsAndTasks(currentOverduePage);
+      fetchDashboardMetricsAndTasks(currentTaskPage);
       setIsEditModalOpen(false); setEditingTask(null);
     } catch (error) { alert("Ошибка сохранения."); }
   };
@@ -295,13 +315,13 @@ function Dashboard() {
       });
 
       setTaskToComplete(null); setCompletionDelayReason('');
-      fetchDashboardMetricsAndTasks(currentOverduePage);
+      fetchDashboardMetricsAndTasks(currentTaskPage);
     } catch (error) { alert("Ошибка при сохранении."); }
   };
 
   const handleQuickDelete = async (taskId) => {
     if (!window.confirm("Удалить задачу?")) return;
-    try { await api.delete(`tasks/${taskId}/`); fetchDashboardMetricsAndTasks(currentOverduePage); setIsEditModalOpen(false); }
+    try { await api.delete(`tasks/${taskId}/`); fetchDashboardMetricsAndTasks(currentTaskPage); setIsEditModalOpen(false); }
     catch (error) { alert("Ошибка при удалении."); }
   };
 
@@ -311,7 +331,7 @@ function Dashboard() {
     try {
       const response = await api.post(`tasks/${editingTask.id}/add_comment/`, { text: newCommentText });
       const updatedTask = { ...editingTask, comments: [...(editingTask.comments || []), response.data] };
-      setEditingTask(updatedTask); setOverdueTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t)); setNewCommentText('');
+      setEditingTask(updatedTask); setDashboardTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t)); setNewCommentText('');
     } catch (error) { alert("Ошибка отправки."); }
   };
 
@@ -322,7 +342,7 @@ function Dashboard() {
     try {
       const response = await api.post(`tasks/${editingTask.id}/upload_files/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       const updatedTask = { ...editingTask, attachments: [...(editingTask.attachments || []), response.data] };
-      setEditingTask(updatedTask); setOverdueTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t));
+      setEditingTask(updatedTask); setDashboardTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t));
     } catch (error) { alert("Ошибка загрузки"); }
   };
 
@@ -331,7 +351,7 @@ function Dashboard() {
     try {
       await api.delete(`attachments/${attachmentId}/`);
       const updatedTask = { ...editingTask, attachments: editingTask.attachments.filter(att => att.id !== attachmentId) };
-      setEditingTask(updatedTask); setOverdueTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t));
+      setEditingTask(updatedTask); setDashboardTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t));
     } catch (error) { alert("Ошибка при удалении файла."); }
   };
 
@@ -452,11 +472,43 @@ function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
-        <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-300 flex items-center space-x-5 relative overflow-hidden"><div className="absolute top-0 right-0 w-2 h-full bg-slate-400"></div><div className="w-16 h-16 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">📋</div><div><p className="text-lg sm:text-2xl text-slate-600 font-extrabold">Всего задач</p><p className="text-4xl sm:text-3xl font-black text-slate-800 mt-1">{metrics.total}</p></div></div>
-        <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-blue-300 flex items-center space-x-5 relative overflow-hidden"><div className="absolute top-0 right-0 w-2 h-full bg-blue-500"></div><div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">⚙️</div><div><p className="text-lg sm:text-2xl text-blue-700 font-extrabold">В работе</p><p className="text-4xl sm:text-3xl font-black text-blue-800 mt-1">{metrics.in_progress}</p></div></div>
-        <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-red-300 flex items-center space-x-5 relative overflow-hidden"><div className="absolute top-0 right-0 w-2 h-full bg-red-500"></div><div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">🔥</div><div><p className="text-lg sm:text-2xl text-red-700 font-extrabold">Просрочено</p><p className="text-4xl sm:text-3xl font-black text-red-800 mt-1">{metrics.overdue_count}</p></div></div>
-        <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-green-300 flex items-center space-x-5 relative overflow-hidden"><div className="absolute top-0 right-0 w-2 h-full bg-green-500"></div><div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">✅</div><div><p className="text-lg sm:text-2xl text-green-700 font-extrabold">Завершено</p><p className="text-4xl sm:text-3xl font-black text-green-800 mt-1">{metrics.completed}</p></div></div>
+      {/* === КЛИКАБЕЛЬНЫЕ ВИДЖЕТЫ ДАШБОРДА === */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8 cursor-pointer select-none">
+        <div
+          onClick={() => handleFilterClick('all')}
+          className={`bg-white p-5 sm:p-6 rounded-2xl shadow-sm flex items-center space-x-5 relative overflow-hidden transition-all duration-200 ${activeTaskFilter === 'all' ? 'ring-4 ring-slate-400 scale-[1.02] border-transparent' : 'border border-slate-300 hover:border-slate-400 hover:shadow-md'}`}
+        >
+          <div className="absolute top-0 right-0 w-2 h-full bg-slate-400"></div>
+          <div className="w-16 h-16 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">📋</div>
+          <div><p className="text-lg sm:text-2xl text-slate-600 font-extrabold">Всего задач</p><p className="text-4xl sm:text-3xl font-black text-slate-800 mt-1">{metrics.total}</p></div>
+        </div>
+
+        <div
+          onClick={() => handleFilterClick('in_progress')}
+          className={`bg-white p-5 sm:p-6 rounded-2xl shadow-sm flex items-center space-x-5 relative overflow-hidden transition-all duration-200 ${activeTaskFilter === 'in_progress' ? 'ring-4 ring-blue-400 scale-[1.02] border-transparent' : 'border border-blue-300 hover:border-blue-400 hover:shadow-md'}`}
+        >
+          <div className="absolute top-0 right-0 w-2 h-full bg-blue-500"></div>
+          <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">⚙️</div>
+          <div><p className="text-lg sm:text-2xl text-blue-700 font-extrabold">В работе</p><p className="text-4xl sm:text-3xl font-black text-blue-800 mt-1">{metrics.in_progress}</p></div>
+        </div>
+
+        <div
+          onClick={() => handleFilterClick('overdue')}
+          className={`bg-white p-5 sm:p-6 rounded-2xl shadow-sm flex items-center space-x-5 relative overflow-hidden transition-all duration-200 ${activeTaskFilter === 'overdue' ? 'ring-4 ring-red-400 scale-[1.02] border-transparent' : 'border border-red-300 hover:border-red-400 hover:shadow-md'}`}
+        >
+          <div className="absolute top-0 right-0 w-2 h-full bg-red-500"></div>
+          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">🔥</div>
+          <div><p className="text-lg sm:text-2xl text-red-700 font-extrabold">Просрочено</p><p className="text-4xl sm:text-3xl font-black text-red-800 mt-1">{metrics.overdue_count}</p></div>
+        </div>
+
+        <div
+          onClick={() => handleFilterClick('completed')}
+          className={`bg-white p-5 sm:p-6 rounded-2xl shadow-sm flex items-center space-x-5 relative overflow-hidden transition-all duration-200 ${activeTaskFilter === 'completed' ? 'ring-4 ring-green-400 scale-[1.02] border-transparent' : 'border border-green-300 hover:border-green-400 hover:shadow-md'}`}
+        >
+          <div className="absolute top-0 right-0 w-2 h-full bg-green-500"></div>
+          <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-6xl shrink-0 shadow-sm">✅</div>
+          <div><p className="text-lg sm:text-2xl text-green-700 font-extrabold">Завершено</p><p className="text-4xl sm:text-3xl font-black text-green-800 mt-1">{metrics.completed}</p></div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 flex-1 pb-10">
@@ -503,12 +555,16 @@ function Dashboard() {
             <li className="flex justify-between items-center border-b border-gray-50 pb-3"><span className="text-gray-600">Задач в работе:</span><span className="font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">{metrics.in_progress}</span></li>
           </ul>
 
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <h4 className="text-sm font-bold text-red-500 uppercase tracking-wider mb-3 flex-shrink-0 flex items-center">🚨 Просроченные ({overdueTasks.length}):</h4>
+          {/* === ДИНАМИЧЕСКИЙ СПИСОК ЗАДАЧ НА ОСНОВЕ ФИЛЬТРА === */}
+          <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 border border-gray-100 rounded-xl p-3">
+            <h4 className={`text-sm font-bold uppercase tracking-wider mb-3 flex-shrink-0 flex items-center ${listConfig.color}`}>
+              {listConfig.title} ({dashboardTasks.length})
+            </h4>
+
             <div className="flex-1 overflow-y-auto space-y-2 pr-1 overflow-x-hidden">
-              {overdueTasks.length > 0 ? (
-                overdueTasks.map(task => (
-                  <div key={task.id} onClick={() => handleTaskClick(task)} className="p-3 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100/60 transition-all cursor-pointer flex justify-between items-start">
+              {dashboardTasks.length > 0 ? (
+                dashboardTasks.map(task => (
+                  <div key={task.id} onClick={() => handleTaskClick(task)} className={`p-3 bg-white border rounded-lg hover:shadow-md transition-all cursor-pointer flex justify-between items-start ${activeTaskFilter === 'overdue' ? 'border-red-100 hover:border-red-300' : 'border-gray-200 hover:border-blue-300'}`}>
                     <div className="max-w-[70%]">
                       <p className="text-sm font-semibold text-gray-800 leading-tight mb-1 truncate break-words">
                         {task.is_milestone && <span className="mr-1" title="Веха">🚩</span>}
@@ -516,16 +572,21 @@ function Dashboard() {
                       </p>
                       <p className="text-[11px] text-blue-600 truncate break-words"><Link to={`/projects/${task.project}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>📁 Перейти в проект</Link></p>
                     </div>
-                    <div className="text-right flex-shrink-0"><span className="text-[10px] bg-red-200 text-red-800 px-2 py-0.5 rounded font-bold">⏳ {task.plan_end_date}</span></div>
+                    <div className="text-right flex-shrink-0">
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${activeTaskFilter === 'overdue' || (new Date(task.plan_end_date) < new Date(today) && task.status !== 'completed') ? 'bg-red-200 text-red-800' : 'bg-gray-100 text-gray-600'}`}>
+                        ⏳ {task.plan_end_date || '—'}
+                      </span>
+                    </div>
                   </div>
                 ))
-              ) : <p className="text-sm text-gray-400 italic py-4 text-center">Просроченные задачи отсутствуют 🎉</p>}
+              ) : <p className="text-sm text-gray-400 italic py-4 text-center">{listConfig.empty}</p>}
             </div>
-            {totalOverduePages > 1 && (
-              <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-100 flex-shrink-0">
-                <button onClick={() => fetchDashboardMetricsAndTasks(Math.max(1, currentOverduePage - 1))} disabled={currentOverduePage === 1} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${currentOverduePage === 1 ? 'text-gray-400 bg-gray-50 cursor-not-allowed' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'}`}>← Назад</button>
-                <span className="text-xs font-medium text-gray-500">Стр. {currentOverduePage} из {totalOverduePages}</span>
-                <button onClick={() => fetchDashboardMetricsAndTasks(Math.min(totalOverduePages, currentOverduePage + 1))} disabled={currentOverduePage === totalOverduePages} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${currentOverduePage === totalOverduePages ? 'text-gray-400 bg-gray-50 cursor-not-allowed' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'}`}>Вперед →</button>
+
+            {totalTaskPages > 1 && (
+              <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-200 flex-shrink-0">
+                <button onClick={() => fetchDashboardMetricsAndTasks(Math.max(1, currentTaskPage - 1))} disabled={currentTaskPage === 1} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${currentTaskPage === 1 ? 'text-gray-400 bg-white cursor-not-allowed border' : 'text-gray-700 bg-white border hover:bg-gray-100'}`}>← Назад</button>
+                <span className="text-xs font-medium text-gray-500">Стр. {currentTaskPage} из {totalTaskPages}</span>
+                <button onClick={() => fetchDashboardMetricsAndTasks(Math.min(totalTaskPages, currentTaskPage + 1))} disabled={currentTaskPage === totalTaskPages} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${currentTaskPage === totalTaskPages ? 'text-gray-400 bg-white cursor-not-allowed border' : 'text-gray-700 bg-white border hover:bg-gray-100'}`}>Вперед →</button>
               </div>
             )}
           </div>
