@@ -138,7 +138,7 @@ function ProjectDetail() {
   const fetchTasks = async () => {
     try {
       setLoadingTasks(true);
-      const tasksRes = await api.get(`tasks/?project=${id}`);
+      const tasksRes = await api.get(`tasks/?project=${id}&no_page=true`);
       const tasksData = tasksRes.data.results || tasksRes.data;
 
       const sortedTasks = [...tasksData].sort((a, b) => {

@@ -37,6 +37,14 @@ class TaskPagination(PageNumberPagination):
     page_size_query_param = 'page_size' # Позволяет фронтенду менять размер при желании
     max_page_size = 100
 
+    def paginate_queryset(self, queryset, request, view=None):
+        # Если фронтенд явно просит отключить пагинацию, возвращаем None
+        if request.query_params.get('no_page') == 'true':
+            return None
+
+        # В противном случае работает стандартная пагинация
+        return super().paginate_queryset(queryset, request, view)
+
 def notify_user(user, title, message, link=None, send_email=True):
     """
     Создает уведомление в БД, отправляет Email и Web Push.

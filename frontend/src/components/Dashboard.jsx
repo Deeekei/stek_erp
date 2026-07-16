@@ -117,10 +117,10 @@ function Dashboard() {
     try {
       let tasksEndpoint = `tasks/overdue/?page_size=5&page=${page}`;
 
-      if (filter === 'all') tasksEndpoint = `tasks/?assigned_to_me=true&page_size=5&page=${page}`;
-      if (filter === 'new') tasksEndpoint = `tasks/?assigned_to_me=true&status=new&page_size=5&page=${page}`;
-      if (filter === 'in_progress') tasksEndpoint = `tasks/?assigned_to_me=true&status=in_progress&page_size=5&page=${page}`;
-      if (filter === 'completed') tasksEndpoint = `tasks/?assigned_to_me=true&status=completed&page_size=5&page=${page}`;
+      if (filter === 'all') tasksEndpoint = `tasks/?assigned_to_me=true&page_size=10&page=${page}`;
+      if (filter === 'new') tasksEndpoint = `tasks/?assigned_to_me=true&status=new&page_size=10&page=${page}`;
+      if (filter === 'in_progress') tasksEndpoint = `tasks/?assigned_to_me=true&status=in_progress&page_size=10&page=${page}`;
+      if (filter === 'completed') tasksEndpoint = `tasks/?assigned_to_me=true&status=completed&page_size=10&page=${page}`;
 
       const [metricsRes, tasksRes] = await Promise.all([
         api.get('tasks/dashboard_metrics/'),
