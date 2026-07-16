@@ -33,7 +33,7 @@ from rest_framework.exceptions import PermissionDenied
 User = get_user_model()
 
 class TaskPagination(PageNumberPagination):
-    page_size = 5  # Строго по 5 задач на страницу
+    page_size = 10  # Строго по 10 задач на страницу
     page_size_query_param = 'page_size' # Позволяет фронтенду менять размер при желании
     max_page_size = 100
 
