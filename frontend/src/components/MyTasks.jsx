@@ -69,7 +69,7 @@ function MyTasks() {
   const fetchData = async () => {
     try {
       const [tasksRes, projectsRes, usersRes] = await Promise.all([
-        api.get('tasks/?assigned_to_me=true'),
+        api.get('tasks/?assigned_to_me=true&no_page=true'),
         api.get('projects/'),
         api.get('users/').catch(() => ({ data: [] }))
       ]);
