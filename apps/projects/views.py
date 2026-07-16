@@ -32,6 +32,10 @@ from rest_framework.exceptions import PermissionDenied
 
 User = get_user_model()
 
+class TaskPagination(PageNumberPagination):
+    page_size = 5  # Строго по 5 задач на страницу
+    page_size_query_param = 'page_size' # Позволяет фронтенду менять размер при желании
+    max_page_size = 100
 
 def notify_user(user, title, message, link=None, send_email=True):
     """
@@ -482,6 +486,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, CanEditTaskPermission]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['project']
+    pagination_class = TaskPagination
 
     def get_queryset(self):
         user = self.request.user
