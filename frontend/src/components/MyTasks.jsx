@@ -802,7 +802,9 @@ function MyTasks() {
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 min-h-0">
                     <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200"><h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4></div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                      {editingTask.comments?.map(c => {
+                      {[...(editingTask.comments || [])]
+  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  .map(c => {
                         const isMe = currentUser && c.author_name && (
                           (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
                           (currentUser.username && c.author_name.includes(currentUser.username))
@@ -857,7 +859,9 @@ function MyTasks() {
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
-                      {editingTask.comments?.map(c => {
+                      {[...(editingTask.comments || [])]
+  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  .map(c => {
                         const isMe = currentUser && c.author_name && (
                           (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
                           (currentUser.username && c.author_name.includes(currentUser.username))
