@@ -138,7 +138,7 @@ function ProjectDetail() {
   const fetchTasks = async () => {
     try {
       setLoadingTasks(true);
-      const tasksRes = await api.get(`tasks/?project=${id}`);
+      const tasksRes = await api.get(`tasks/?project=${id}&no_page=true`);
       const tasksData = tasksRes.data.results || tasksRes.data;
 
       const sortedTasks = [...tasksData].sort((a, b) => {
@@ -1007,7 +1007,9 @@ function ProjectDetail() {
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 p-6 md:p-8">
                     <h4 className="text-lg font-extrabold text-gray-800 mb-4 flex-shrink-0 flex items-center gap-2">💬 Чат</h4>
                     <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
-                      {editingTask.comments?.map(c => {
+                      {[...(editingTask.comments || [])]
+  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  .map(c => {
                         const isMe = currentUser && c.author_name && (
                           (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
                           (currentUser.username && c.author_name.includes(currentUser.username))
@@ -1073,7 +1075,9 @@ function ProjectDetail() {
                     </h2>
 
                     <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
-                      {editingTask.comments?.map(c => {
+                      {[...(editingTask.comments || [])]
+  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  .map(c => {
                         const isMe = currentUser && c.author_name && (
                           (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
                           (currentUser.username && c.author_name.includes(currentUser.username))

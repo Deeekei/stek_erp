@@ -16,7 +16,7 @@ function Dashboard() {
   const [metrics, setMetrics] = useState({ total: 0, new_tasks: 0, in_progress: 0, completed: 0, overdue_count: 0 });
 
   // === НОВЫЕ СТЕЙТЫ ДЛЯ ДИНАМИЧЕСКОГО СПИСКА ЗАДАЧ ===
-  const [activeTaskFilter, setActiveTaskFilter] = useState('overdue'); // По умолчанию показываем просроченные
+  const [activeTaskFilter, setActiveTaskFilter] = useState('overdue');
   const [dashboardTasks, setDashboardTasks] = useState([]);
   const [currentTaskPage, setCurrentTaskPage] = useState(1);
   const [totalTaskPages, setTotalTaskPages] = useState(1);
@@ -113,36 +113,35 @@ function Dashboard() {
     } catch (error) { console.error("Ошибка фоновой загрузки:", error); }
   };
 
-  // === ОБНОВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ С УЧЕТОМ ФИЛЬТРА ===
   const fetchDashboardMetricsAndTasks = async (page, filter = activeTaskFilter) => {
     try {
-      let tasksEndpoint = `tasks/overdue/?page=${page}`; // По умолчанию
+      let tasksEndpoint = `tasks/overdue/?page_size=5&page=${page}`;
 
-      // ДОБАВЛЕН ПАРАМЕТР assigned_to_me=true ВО ВСЕ ЗАПРОСЫ
-      if (filter === 'all') tasksEndpoint = `tasks/?assigned_to_me=true&page=${page}`;
-      if (filter === 'new') tasksEndpoint = `tasks/?assigned_to_me=true&status=new&page=${page}`;
-      if (filter === 'in_progress') tasksEndpoint = `tasks/?assigned_to_me=true&status=in_progress&page=${page}`;
-      if (filter === 'completed') tasksEndpoint = `tasks/?assigned_to_me=true&status=completed&page=${page}`;
+      if (filter === 'all') tasksEndpoint = `tasks/?assigned_to_me=true&page_size=10&page=${page}`;
+      if (filter === 'new') tasksEndpoint = `tasks/?assigned_to_me=true&status=new&page_size=10&page=${page}`;
+      if (filter === 'in_progress') tasksEndpoint = `tasks/?assigned_to_me=true&status=in_progress&page_size=10&page=${page}`;
+      if (filter === 'completed') tasksEndpoint = `tasks/?assigned_to_me=true&status=completed&page_size=10&page=${page}`;
 
       const [metricsRes, tasksRes] = await Promise.all([
         api.get('tasks/dashboard_metrics/'),
         api.get(tasksEndpoint)
       ]);
-        setMetrics(metricsRes.data);
+
+      setMetrics(metricsRes.data);
+
       let fetchedTasks = (tasksRes.data.results || tasksRes.data);
       if (filter === 'overdue') {
         fetchedTasks = fetchedTasks.filter(t => t.status !== 'delayed');
       }
 
       setDashboardTasks(fetchedTasks);
-      setTotalTaskPages(Math.ceil((tasksRes.data.count || 0) / 10) || 1);
+      setTotalTaskPages(Math.ceil((tasksRes.data.count || 0) / 5) || 1);
       setCurrentTaskPage(page);
     } catch (error) {
       if (error.response?.status === 404 && page > 1) fetchDashboardMetricsAndTasks(page - 1, filter);
     }
   };
 
-  // === ВОССТАНОВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ НОВОСТЕЙ ===
   const fetchNews = async (page) => {
     try {
       const res = await api.get(`news/?page=${page}`);
@@ -155,14 +154,12 @@ function Dashboard() {
     }
   };
 
-  // === ОБРАБОТЧИК КЛИКА ПО ВИДЖЕТУ ДАШБОРДА ===
   const handleFilterClick = (filter) => {
     setActiveTaskFilter(filter);
     setCurrentTaskPage(1);
     fetchDashboardMetricsAndTasks(1, filter);
   };
 
-  // === ДИНАМИЧЕСКИЙ ЗАГОЛОВОК И ТЕКСТ СПИСКА ЗАДАЧ ===
   const getListConfig = () => {
     switch(activeTaskFilter) {
       case 'all': return { title: '📋 Все задачи', empty: 'Нет задач', color: 'text-gray-700' };
@@ -173,6 +170,20 @@ function Dashboard() {
     }
   };
   const listConfig = getListConfig();
+  const getPriorityInfo = (priority) => {
+    switch (priority) {
+      case 'low':
+        return { label: 'Низкая', color: 'bg-green-100 text-green-800 border-green-200', icon: '🟢' };
+      case 'medium':
+        return { label: 'Средняя', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: '🔵' };
+      case 'high':
+        return { label: 'Высокая', color: 'bg-purple-100 text-purple-800 border-purple-200', icon: '🟣' };
+      case 'critical':
+        return { label: 'Критичная', color: 'bg-red-100 text-red-800 border-red-200', icon: '🔴' };
+      default:
+        return { label: 'Не указана', color: 'bg-gray-100 text-gray-800 border-gray-200', icon: '⚪' };
+    }
+  };
 
   const handleDownloadEmployeeReport = async () => {
     if (!reportUserId) return alert("Пожалуйста, выберите сотрудника!");
@@ -261,8 +272,11 @@ function Dashboard() {
 
   const handleTaskClick = (task) => {
     setEditingTask(task);
+
+    // БЕЗОПАСНОЕ ИЗВЛЕЧЕНИЕ ID
     const assigneeId = task.assignee && typeof task.assignee === 'object' ? task.assignee.id : task.assignee;
     const executorId = task.executor && typeof task.executor === 'object' ? task.executor.id : task.executor;
+    const projectId = task.project && typeof task.project === 'object' ? task.project.id : task.project;
 
     setEditFormData({
       title: task.title || '', description: task.description || '', status: task.status || 'new', plan_start_date: task.plan_start_date || '',
@@ -270,7 +284,7 @@ function Dashboard() {
       assignee: assigneeId || null,
       executor: executorId || null,
       priority: task.priority || 'medium', participants: task.participants || [],
-      project: task.project || null,
+      project: projectId || null, // Теперь здесь точно хранится ID, а не объект!
       is_milestone: task.is_milestone || false,
       law_type: task.law_type || 'other'
     });
@@ -293,7 +307,10 @@ function Dashboard() {
       (editingTask.assignee && (typeof editingTask.assignee === 'object' ? editingTask.assignee.id == currentUser?.id : editingTask.assignee == currentUser?.id)) ||
       (editingTask.executor && (typeof editingTask.executor === 'object' ? editingTask.executor.id == currentUser?.id : editingTask.executor == currentUser?.id));
 
-    const taskProject = projects.find(p => p.id === editingTask.project);
+    // Безопасное извлечение ID проекта
+    const currentProjectId = editingTask?.project && typeof editingTask.project === 'object' ? editingTask.project.id : editingTask?.project;
+    const taskProject = projects.find(p => p.id === currentProjectId);
+
     const isBoss = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) || (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
 
     const payload = { ...editFormData };
@@ -335,7 +352,9 @@ function Dashboard() {
       (taskToComplete.assignee && (typeof taskToComplete.assignee === 'object' ? taskToComplete.assignee.id == currentUser?.id : taskToComplete.assignee == currentUser?.id)) ||
       (taskToComplete.executor && (typeof taskToComplete.executor === 'object' ? taskToComplete.executor.id == currentUser?.id : taskToComplete.executor == currentUser?.id));
 
-    const taskProject = projects.find(p => p.id === taskToComplete.project);
+    const currentProjectId = taskToComplete?.project && typeof taskToComplete.project === 'object' ? taskToComplete.project.id : taskToComplete?.project;
+    const taskProject = projects.find(p => p.id === currentProjectId);
+
     const isBoss = isFullAccess || taskProject?.owner === currentUser?.id || taskProject?.manager === currentUser?.id || (taskProject?.visibility === 'selected' && taskProject?.allowed_users?.includes(currentUser?.id)) || (taskProject?.visibility === 'all' && currentUser?.role === 'manager');
 
     const payload = { status: 'completed', delay_reason: completionDelayReason, actual_end_date: today };
@@ -393,7 +412,10 @@ function Dashboard() {
     } catch (error) { alert("Ошибка при удалении файла."); }
   };
 
-  const taskProject = editingTask ? projects.find(p => p.id === editingTask.project) : null;
+  // === БЕЗОПАСНОЕ ОПРЕДЕЛЕНИЕ ПРОЕКТА ДЛЯ МОДАЛКИ ===
+  const currentProjectId = editingTask?.project && typeof editingTask.project === 'object' ? editingTask.project.id : editingTask?.project;
+  const taskProject = currentProjectId ? projects.find(p => p.id === currentProjectId) : null;
+
   const isRoleManager = currentUser?.role === 'manager';
   const isBossAll = isFullAccess ||
     taskProject?.owner === currentUser?.id ||
@@ -603,14 +625,21 @@ function Dashboard() {
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1 overflow-x-hidden">
               {dashboardTasks.length > 0 ? (
-                dashboardTasks.map(task => (
+                dashboardTasks.map(task => {
+                  // Безопасное извлечение ID проекта для ссылки
+                  const listProjectId = task.project && typeof task.project === 'object' ? task.project.id : task.project;
+
+                  return (
                   <div key={task.id} onClick={() => handleTaskClick(task)} className={`p-3 bg-white border rounded-lg hover:shadow-md transition-all cursor-pointer flex justify-between items-start ${activeTaskFilter === 'overdue' ? 'border-red-100 hover:border-red-300' : 'border-gray-200 hover:border-blue-300'}`}>
                     <div className="max-w-[70%]">
                       <p className="text-sm font-semibold text-gray-800 leading-tight mb-1 truncate break-words">
                         {task.is_milestone && <span className="mr-1" title="Веха">🚩</span>}
                         {task.title}
                       </p>
-                      <p className="text-[11px] text-blue-600 truncate break-words"><Link to={`/projects/${task.project}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>📁 Перейти в проект</Link></p>
+                      <p className="text-[11px] text-blue-600 truncate break-words">
+                        {/* ИСПОЛЬЗУЕМ listProjectId ЧТОБЫ ИЗБЕЖАТЬ ОШИБОК МАРШРУТИЗАЦИИ */}
+                        <Link to={`/projects/${listProjectId}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>📁 Перейти в проект</Link>
+                      </p>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${activeTaskFilter === 'overdue' || (new Date(task.plan_end_date) < new Date(today) && task.status !== 'completed') ? 'bg-red-200 text-red-800' : 'bg-gray-100 text-gray-600'}`}>
@@ -618,7 +647,7 @@ function Dashboard() {
                       </span>
                     </div>
                   </div>
-                ))
+                )})
               ) : <p className="text-sm text-gray-400 italic py-4 text-center">{listConfig.empty}</p>}
             </div>
 
@@ -681,7 +710,8 @@ function Dashboard() {
                       <div className="flex justify-between items-start mb-4">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold px-2 py-1 bg-gray-100 text-gray-500 rounded">#{editingTask.id}</span>
-                          <span className="text-xs font-bold px-2 py-1 bg-blue-100 text-blue-800 rounded uppercase tracking-wide">📁 Проект: {taskProject?.title || editingTask.project}</span>
+                          {/* БЕЗОПАСНЫЙ РЕНДЕР ID ПРОЕКТА */}
+                          <span className="text-xs font-bold px-2 py-1 bg-blue-100 text-blue-800 rounded uppercase tracking-wide">📁 Проект: {taskProject?.title || currentProjectId || 'Не указан'}</span>
                         </div>
                         <button onClick={() => handleQuickDelete(editingTask.id)} className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap ml-3">Удалить</button>
                       </div>
@@ -774,7 +804,9 @@ function Dashboard() {
                   <div className="w-full md:w-1/3 flex flex-col bg-slate-50 min-h-0">
                     <div className="p-6 pb-2 flex-shrink-0 border-b border-gray-200"><h4 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">💬 Чат</h4></div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                      {editingTask.comments?.map(c => {
+                      {[...(editingTask.comments || [])]
+  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  .map(c => {
                         const isMe = currentUser && c.author_name && (
                           (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
                           (currentUser.username && c.author_name.includes(currentUser.username))
@@ -829,7 +861,9 @@ function Dashboard() {
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4">
-                      {editingTask.comments?.map(c => {
+                      {[...(editingTask.comments || [])]
+  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  .map(c => {
                         const isMe = currentUser && c.author_name && (
                           (currentUser.first_name && c.author_name.includes(currentUser.first_name)) ||
                           (currentUser.username && c.author_name.includes(currentUser.username))
@@ -937,7 +971,8 @@ function Dashboard() {
 
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Сроки</span><span className="text-sm font-semibold text-gray-800">{editingTask.plan_start_date || '—'} → <span className={new Date(editingTask.plan_end_date) < new Date(today) && editingTask.status !== 'completed' ? 'text-red-500' : ''}>{editingTask.plan_end_date || '—'}</span></span></div>
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Критичность</span><span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${getPriorityInfo(editingTask.priority).color}`}>{getPriorityInfo(editingTask.priority).icon} {getPriorityInfo(editingTask.priority).label}</span></div>
-                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100"><span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span><span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${editingTask.project}`} className="hover:underline">📁 {taskProject?.title || editingTask.project}</Link></span></div>
+                      {/* БЕЗОПАСНАЯ ССЫЛКА НА ПРОЕКТ */}
+                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100"><span className="block text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">Проект</span><span className="text-sm font-semibold text-blue-900 truncate block"><Link to={`/projects/${currentProjectId}`} className="hover:underline">📁 {taskProject?.title || currentProjectId || 'Не указан'}</Link></span></div>
                     </div>
 
                     <div className="mb-6 flex-1"><span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2">Описание</span><div className="text-gray-700 text-sm whitespace-pre-wrap leading-relaxed">{editingTask.description || <span className="italic text-gray-400">Описание отсутствует.</span>}</div></div>
