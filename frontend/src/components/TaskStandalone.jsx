@@ -279,7 +279,9 @@ function TaskStandalone() {
                 <span className="mr-2">💬</span> Обсуждение ({task.comments?.length || 0})
               </h3>
               <div className="flex-1 overflow-y-auto space-y-4 mb-6 pr-2">
-                {task.comments?.map(comment => {
+                {[...(task.comments || [])]
+                  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+                  .map(comment => {
                   const isMe = currentUser && comment.author_details && currentUser.id === comment.author_details.id;
                   return (
                     <div key={comment.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
