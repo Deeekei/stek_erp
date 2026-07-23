@@ -564,9 +564,20 @@ function ProjectDetail() {
 
   const handleQuickDelete = async (taskId) => {
     if (!window.confirm("Удалить задачу?")) return;
-    setTasks(prevTasks => prevTasks.filter(t => t.id !== taskId));
+
+    // Гарантированно превращаем ID в число, так как Гант отдает строку
+    const numericId = Number(taskId);
+
+    // Теперь фильтрация сработает мгновенно
+    setTasks(prevTasks => prevTasks.filter(t => t.id !== numericId));
     setIsEditModalOpen(false);
-    try { await api.delete(`tasks/${taskId}/`); } catch (error) { fetchTasks(); }
+
+    try {
+      await api.delete(`tasks/${numericId}/`);
+    } catch (error) {
+      // Если на сервере произошла ошибка, возвращаем реальные данные
+      fetchTasks();
+    }
   };
 
   const handleAddComment = async (e) => {
