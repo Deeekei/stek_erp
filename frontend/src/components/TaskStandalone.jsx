@@ -279,15 +279,24 @@ function TaskStandalone() {
                 <span className="mr-2">💬</span> Обсуждение ({task.comments?.length || 0})
               </h3>
               <div className="flex-1 overflow-y-auto space-y-4 mb-6 pr-2">
-                {task.comments?.map(comment => {
-                  const isMe = currentUser && comment.author_details && currentUser.id === comment.author_details.id;
+                {/* Обновленный блок сортировки и отображения комментариев */}
+                {[...(task.comments || [])]
+                  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+                  .map(comment => {
+                  const isMe = currentUser && comment.author_name && (
+                    (currentUser.first_name && comment.author_name.includes(currentUser.first_name)) ||
+                    (currentUser.username && comment.author_name.includes(currentUser.username))
+                  );
                   return (
                     <div key={comment.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                       <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white border border-gray-100 text-gray-800 rounded-bl-none'}`}>
                         <div className="flex justify-between items-end mb-1 gap-4">
-                          {!isMe && <span className="font-bold text-xs text-blue-600">{comment.author_details?.first_name} {comment.author_details?.last_name}</span>}
+                          {!isMe && <span className="font-bold text-xs text-blue-600">{comment.author_name}</span>}
                           <span className={`text-[10px] font-medium opacity-70 ${isMe ? 'text-blue-100' : 'text-gray-400'}`}>
-                            {new Date(comment.created_at).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}
+                            {new Date(comment.created_at).toLocaleString('ru-RU', {
+                              day: '2-digit', month: '2-digit', year: '2-digit',
+                              hour: '2-digit', minute: '2-digit'
+                            })}
                           </span>
                         </div>
                         <p className="whitespace-pre-wrap leading-relaxed">{comment.text}</p>
